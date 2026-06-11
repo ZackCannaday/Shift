@@ -1,0 +1,31 @@
+kind = "web"
+previewPath = "/"
+title = "Shift — AI Personalization"
+version = "1.0.0"
+id = "artifacts/shift"
+router = "path"
+
+[[integratedSkills]]
+name = "react-vite"
+version = "1.0.0"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 20747
+
+[services.development]
+run = "pnpm --filter @workspace/shift run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/shift", "run", "build" ]
+publicDir = "artifacts/shift/dist/public"
+serve = "static"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "20747"
+BASE_PATH = "/"
