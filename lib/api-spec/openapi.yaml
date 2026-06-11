@@ -1,22 +1,24 @@
 openapi: 3.1.0
 info:
-  # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: Shift — AI-powered visitor personalization engine
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
     description: Health operations
+  - name: visitors
+    description: Visitor session tracking and AI intent detection
+  - name: dashboard
+    description: Analytics dashboard
 paths:
   /healthz:
     get:
       operationId: healthCheck
       tags: [health]
       summary: Health check
-      description: Returns server health status
       responses:
         "200":
           description: Healthy
@@ -24,6 +26,166 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  /visitors:
+    get:
+      operationId: listVisitors
+      tags: [visitors]
+      summary: List all visitor sessions
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+        - name: persona
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: List of visitors
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Visitor"
+    post:
+      operationId: createVisitor
+      tags: [visitors]
+      summary: Create a new visitor session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VisitorInput"
+      responses:
+        "201":
+          description: Visitor created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Visitor"
+
+  /visitors/{id}:
+    get:
+      operationId: getVisitor
+      tags: [visitors]
+      summary: Get a visitor session
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Visitor found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Visitor"
+        "404":
+          description: Not found
+    patch:
+      operationId: updateVisitor
+      tags: [visitors]
+      summary: Update visitor conversion/engagement
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VisitorUpdate"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Visitor"
+
+  /visitors/detect-intent:
+    post:
+      operationId: detectIntent
+      tags: [visitors]
+      summary: Use AI to detect visitor intent and return personalized content
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IntentInput"
+      responses:
+        "200":
+          description: Detected persona and personalized content
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IntentResult"
+
+  /dashboard/stats:
+    get:
+      operationId: getDashboardStats
+      tags: [dashboard]
+      summary: Overall visit and conversion stats
+      responses:
+        "200":
+          description: Stats
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DashboardStats"
+
+  /dashboard/funnel-breakdown:
+    get:
+      operationId: getFunnelBreakdown
+      tags: [dashboard]
+      summary: Visitor count and conversion rate per persona/funnel
+      responses:
+        "200":
+          description: Funnel breakdown
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/FunnelStat"
+
+  /dashboard/recent-activity:
+    get:
+      operationId: getRecentActivity
+      tags: [dashboard]
+      summary: Most recent visitor sessions with intent signals
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        "200":
+          description: Recent visitors
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Visitor"
+
 components:
   schemas:
     HealthStatus:
@@ -34,3 +196,158 @@ components:
       required:
         - status
 
+    Visitor:
+      type: object
+      required: [id, sessionId, persona, converted, createdAt]
+      properties:
+        id:
+          type: integer
+        sessionId:
+          type: string
+        referrer:
+          type: ["string", "null"]
+        utmSource:
+          type: ["string", "null"]
+        utmMedium:
+          type: ["string", "null"]
+        utmCampaign:
+          type: ["string", "null"]
+        userAgent:
+          type: ["string", "null"]
+        deviceType:
+          type: ["string", "null"]
+        intentSignals:
+          type: ["string", "null"]
+        persona:
+          type: string
+        personaConfidence:
+          type: ["number", "null"]
+        headline:
+          type: ["string", "null"]
+        subheadline:
+          type: ["string", "null"]
+        ctaText:
+          type: ["string", "null"]
+        converted:
+          type: boolean
+        conversionEvent:
+          type: ["string", "null"]
+        timeOnSite:
+          type: ["integer", "null"]
+        createdAt:
+          type: string
+        updatedAt:
+          type: string
+
+    VisitorInput:
+      type: object
+      required: [sessionId]
+      properties:
+        sessionId:
+          type: string
+        referrer:
+          type: string
+        utmSource:
+          type: string
+        utmMedium:
+          type: string
+        utmCampaign:
+          type: string
+        userAgent:
+          type: string
+        deviceType:
+          type: string
+
+    VisitorUpdate:
+      type: object
+      properties:
+        converted:
+          type: boolean
+        conversionEvent:
+          type: string
+        timeOnSite:
+          type: integer
+        persona:
+          type: string
+        headline:
+          type: string
+        subheadline:
+          type: string
+        ctaText:
+          type: string
+
+    IntentInput:
+      type: object
+      required: [sessionId]
+      properties:
+        sessionId:
+          type: string
+        referrer:
+          type: string
+        utmSource:
+          type: string
+        utmMedium:
+          type: string
+        utmCampaign:
+          type: string
+        userAgent:
+          type: string
+        deviceType:
+          type: string
+        pageTitle:
+          type: string
+
+    IntentResult:
+      type: object
+      required: [persona, confidence, headline, subheadline, ctaText, funnelTheme]
+      properties:
+        persona:
+          type: string
+        confidence:
+          type: number
+        headline:
+          type: string
+        subheadline:
+          type: string
+        ctaText:
+          type: string
+        funnelTheme:
+          type: string
+        reasoning:
+          type: string
+        visitorId:
+          type: ["integer", "null"]
+
+    DashboardStats:
+      type: object
+      required: [totalVisitors, totalConverted, conversionRate, uniquePersonas, avgTimeOnSite]
+      properties:
+        totalVisitors:
+          type: integer
+        totalConverted:
+          type: integer
+        conversionRate:
+          type: number
+        uniquePersonas:
+          type: integer
+        avgTimeOnSite:
+          type: ["number", "null"]
+        todayVisitors:
+          type: integer
+        todayConverted:
+          type: integer
+
+    FunnelStat:
+      type: object
+      required: [persona, count, converted, conversionRate]
+      properties:
+        persona:
+          type: string
+        count:
+          type: integer
+        converted:
+          type: integer
+        conversionRate:
+          type: number
+        avgConfidence:
+          type: ["number", "null"]
