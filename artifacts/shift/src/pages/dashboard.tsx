@@ -1,10 +1,13 @@
-import { useState, useEffect, useCallback } from "react";
-import { Link } from "wouter";
+import { useState, useEffect } from "react";
+import { Link, useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
+import {
+  AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
+} from "recharts";
 import {
   ArrowLeft, Users, MousePointerClick, Percent, Clock,
   Activity, MapPin, Laptop, Terminal, Briefcase,
-  Paintbrush, Radio, TrendingUp, Key, ExternalLink,
+  Paintbrush, Radio, TrendingUp, Key, ExternalLink, LogOut,
 } from "lucide-react";
 
 const PERSONA: Record<string, { color: string; bg: string; border: string; label: string; icon: React.ElementType }> = {
@@ -12,55 +15,24 @@ const PERSONA: Record<string, { color: string; bg: string; border: string; label
   business: { color: "#818cf8", bg: "rgba(129,140,248,0.08)", border: "rgba(129,140,248,0.2)", label: "Business", icon: Briefcase },
   creator: { color: "#fb923c", bg: "rgba(251,146,60,0.08)", border: "rgba(251,146,60,0.2)", label: "Creator", icon: Paintbrush },
 };
-
 const DEFAULT_PERSONA = { color: "#94a3b8", bg: "rgba(148,163,184,0.08)", border: "rgba(148,163,184,0.2)", label: "Unknown", icon: Activity };
-
 function getPersona(p: string) { return PERSONA[p] ?? DEFAULT_PERSONA; }
 
 function apiUrl(path: string, apiKey: string | null) {
-  const base = `/api${path}`;
-  return apiKey ? `${base}?apiKey=${encodeURIComponent(apiKey)}` : base;
+  return apiKey ? `/api${path}?apiKey=${encodeURIComponent(apiKey)}` : `/api${path}`;
 }
-
 async function apiFetch<T>(url: string): Promise<T> {
   const res = await fetch(url);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.json();
 }
 
-interface DashboardStats {
-  totalVisitors: number;
-  totalConverted: number;
-  conversionRate: number;
-  uniquePersonas: number;
-  avgTimeOnSite: number | null;
-  todayVisitors: number;
-  todayConverted: number;
-}
+interface DashboardStats { totalVisitors: number; totalConverted: number; conversionRate: number; avgTimeOnSite: number | null; todayVisitors: number; todayConverted: number; }
+interface FunnelStat { persona: string; count: number; conversionRate: number; avgConfidence: number | null; }
+interface Visitor { id: number; sessionId: string; persona: string; personaConfidence: number | null; referrer: string | null; deviceType: string | null; utmSource: string | null; converted: boolean; timeOnSite: number | null; createdAt: string; }
+interface TimeseriesPoint { date: string; technical: number; business: number; creator: number; total: number; }
 
-interface FunnelStat {
-  persona: string;
-  count: number;
-  conversionRate: number;
-  avgConfidence: number | null;
-}
-
-interface Visitor {
-  id: number;
-  sessionId: string;
-  persona: string;
-  personaConfidence: number | null;
-  referrer: string | null;
-  deviceType: string | null;
-  utmSource: string | null;
-  converted: boolean;
-  timeOnSite: number | null;
-  createdAt: string;
-}
-
-function StatCard({ label, value, sub, accent, icon: Icon }: {
-  label: string; value: string | number; sub: string; accent: string; icon: React.ElementType;
-}) {
+function StatCard({ label, value, sub, accent, icon: Icon }: { label: string; value: string | number; sub: string; accent: string; icon: React.ElementType }) {
   return (
     <div className="rounded-2xl border border-white/8 bg-white/[0.03] p-6 flex flex-col gap-3 hover:border-white/15 transition-colors">
       <div className="flex items-center justify-between">
@@ -75,9 +47,7 @@ function StatCard({ label, value, sub, accent, icon: Icon }: {
   );
 }
 
-function PersonaBar({ persona, count, total, convRate, confidence }: {
-  persona: string; count: number; total: number; convRate: number; confidence: number;
-}) {
+function PersonaBar({ persona, count, total, convRate, confidence }: { persona: string; count: number; total: number; convRate: number; confidence: number }) {
   const cfg = getPersona(persona);
   const Icon = cfg.icon;
   const pct = total > 0 ? Math.round((count / total) * 100) : 0;
@@ -121,9 +91,7 @@ function ActivityRow({ visitor }: { visitor: Visitor }) {
           <span className="text-[10px] font-mono px-1.5 py-0.5 rounded" style={{ backgroundColor: cfg.bg, color: cfg.color, border: `1px solid ${cfg.border}` }}>
             {cfg.label} · {Math.round((visitor.personaConfidence || 0) * 100)}%
           </span>
-          {visitor.converted && (
-            <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-emerald-950/50 text-emerald-400 border border-emerald-700/30">✓ Converted</span>
-          )}
+          {visitor.converted && <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-emerald-950/50 text-emerald-400 border border-emerald-700/30">✓ Converted</span>}
         </div>
         <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] text-white/25 font-mono">
           {hostname && <span className="flex items-center gap-1"><MapPin className="w-2.5 h-2.5" />{hostname}</span>}
@@ -139,42 +107,47 @@ function ActivityRow({ visitor }: { visitor: Visitor }) {
   );
 }
 
+const CustomTooltip = ({ active, payload, label }: any) => {
+  if (!active || !payload?.length) return null;
+  return (
+    <div className="rounded-xl border border-white/10 bg-[#0a0a14]/95 backdrop-blur p-3 shadow-xl">
+      <p className="text-xs font-mono text-white/50 mb-2">{label}</p>
+      {payload.map((p: any) => (
+        <div key={p.dataKey} className="flex items-center gap-2 text-xs font-mono">
+          <span className="w-2 h-2 rounded-full" style={{ backgroundColor: p.color }} />
+          <span className="text-white/60 capitalize">{p.dataKey}:</span>
+          <span className="text-white font-semibold">{p.value}</span>
+        </div>
+      ))}
+    </div>
+  );
+};
+
 export default function Dashboard() {
+  const [, navigate] = useLocation();
   const [now, setNow] = useState(new Date());
   const [apiKey, setApiKey] = useState<string | null>(null);
   const [apiName, setApiName] = useState<string | null>(null);
 
+  useEffect(() => { const t = setInterval(() => setNow(new Date()), 1000); return () => clearInterval(t); }, []);
   useEffect(() => {
-    const t = setInterval(() => setNow(new Date()), 1000);
-    return () => clearInterval(t);
+    setApiKey(localStorage.getItem("shift_api_key"));
+    setApiName(localStorage.getItem("shift_api_name"));
   }, []);
 
-  useEffect(() => {
-    const key = localStorage.getItem("shift_api_key");
-    const name = localStorage.getItem("shift_api_name");
-    setApiKey(key);
-    setApiName(name);
-  }, []);
+  const handleLogout = () => {
+    localStorage.removeItem("shift_api_key");
+    localStorage.removeItem("shift_api_name");
+    navigate("/");
+  };
 
-  const { data: stats } = useQuery<DashboardStats>({
-    queryKey: ["dashboard-stats", apiKey],
-    queryFn: () => apiFetch(apiUrl("/dashboard/stats", apiKey)),
-    refetchInterval: 10000,
-  });
-
-  const { data: funnel } = useQuery<FunnelStat[]>({
-    queryKey: ["funnel-breakdown", apiKey],
-    queryFn: () => apiFetch(apiUrl("/dashboard/funnel-breakdown", apiKey)),
-    refetchInterval: 10000,
-  });
-
-  const { data: recent } = useQuery<Visitor[]>({
-    queryKey: ["recent-activity", apiKey],
-    queryFn: () => apiFetch(apiUrl("/dashboard/recent-activity", apiKey)),
-    refetchInterval: 10000,
-  });
+  const { data: stats } = useQuery<DashboardStats>({ queryKey: ["stats", apiKey], queryFn: () => apiFetch(apiUrl("/dashboard/stats", apiKey)), refetchInterval: 10000 });
+  const { data: funnel } = useQuery<FunnelStat[]>({ queryKey: ["funnel", apiKey], queryFn: () => apiFetch(apiUrl("/dashboard/funnel-breakdown", apiKey)), refetchInterval: 10000 });
+  const { data: recent } = useQuery<Visitor[]>({ queryKey: ["recent", apiKey], queryFn: () => apiFetch(apiUrl("/dashboard/recent-activity", apiKey)), refetchInterval: 10000 });
+  const { data: timeseries } = useQuery<TimeseriesPoint[]>({ queryKey: ["timeseries", apiKey], queryFn: () => apiFetch(apiUrl("/dashboard/timeseries?days=7", apiKey)), refetchInterval: 30000 });
 
   const convRate = ((stats?.conversionRate || 0) * 100).toFixed(1);
+  const hasChartData = timeseries?.some(d => d.total > 0);
 
   return (
     <div className="min-h-screen w-full bg-[#030712] text-white font-sans">
@@ -196,13 +169,14 @@ export default function Dashboard() {
             </h1>
             <p className="text-sm text-white/30 font-mono mt-1">Real-time personalization telemetry</p>
           </div>
-          <div className="flex items-center gap-3">
-            <Link href="/">
-              <button className="flex items-center gap-2 text-xs font-mono text-white/40 hover:text-white/80 transition-colors px-4 py-2.5 rounded-xl border border-white/10 hover:border-white/20 bg-white/[0.02]">
-                <ArrowLeft className="w-3.5 h-3.5" />
-                Live Site
+          <div className="flex items-center gap-2">
+            <Link href="/"><button className="flex items-center gap-2 text-xs font-mono text-white/40 hover:text-white/80 transition-colors px-4 py-2.5 rounded-xl border border-white/10 hover:border-white/20 bg-white/[0.02]"><ArrowLeft className="w-3.5 h-3.5" />Live Site</button></Link>
+            {apiKey && (
+              <button onClick={handleLogout} className="flex items-center gap-2 text-xs font-mono text-white/30 hover:text-red-400 transition-colors px-3 py-2.5 rounded-xl border border-white/8 hover:border-red-800/30 bg-white/[0.02]">
+                <LogOut className="w-3.5 h-3.5" />
+                Sign out
               </button>
-            </Link>
+            )}
           </div>
         </header>
 
@@ -211,29 +185,22 @@ export default function Dashboard() {
           <div className="flex items-center justify-between gap-4 px-4 py-3 rounded-xl border border-indigo-700/20 bg-indigo-950/10">
             <div className="flex items-center gap-3 min-w-0">
               <Key className="w-3.5 h-3.5 text-indigo-400 flex-shrink-0" />
-              <div className="min-w-0">
-                <span className="text-xs font-mono text-white/50">Filtering by key for </span>
-                <span className="text-xs font-semibold text-white/80">{apiName ?? "your account"}</span>
-                <span className="text-xs font-mono text-white/25 ml-2 hidden sm:inline">{apiKey.slice(0, 20)}···</span>
-              </div>
+              <span className="text-xs font-mono text-white/50">Filtering by key for </span>
+              <span className="text-xs font-semibold text-white/80">{apiName ?? "your account"}</span>
+              <span className="text-xs font-mono text-white/20 hidden sm:inline">{apiKey.slice(0, 20)}···</span>
             </div>
-            <Link href="/start">
-              <button className="flex items-center gap-1.5 text-[11px] font-mono text-indigo-400 hover:text-indigo-300 transition-colors flex-shrink-0">
-                Manage key <ExternalLink className="w-3 h-3" />
-              </button>
-            </Link>
+            <Link href="/start"><button className="flex items-center gap-1.5 text-[11px] font-mono text-indigo-400 hover:text-indigo-300 transition-colors flex-shrink-0">Manage key <ExternalLink className="w-3 h-3" /></button></Link>
           </div>
         ) : (
           <div className="flex items-center justify-between gap-4 px-4 py-3 rounded-xl border border-white/8 bg-white/[0.02]">
             <div className="flex items-center gap-3">
               <Key className="w-3.5 h-3.5 text-white/30 flex-shrink-0" />
-              <span className="text-xs font-mono text-white/30">Showing all visitors · Get an API key to filter by your site</span>
+              <span className="text-xs font-mono text-white/30">Showing all visitors · Sign in or get a key to filter by your site</span>
             </div>
-            <Link href="/start">
-              <button className="flex items-center gap-1.5 text-[11px] font-mono text-cyan-400 hover:text-cyan-300 transition-colors flex-shrink-0">
-                Get key <ExternalLink className="w-3 h-3" />
-              </button>
-            </Link>
+            <div className="flex items-center gap-3">
+              <Link href="/login"><button className="text-[11px] font-mono text-indigo-400 hover:text-indigo-300 transition-colors flex-shrink-0 flex items-center gap-1">Sign in <ExternalLink className="w-3 h-3" /></button></Link>
+              <Link href="/start"><button className="text-[11px] font-mono text-cyan-400 hover:text-cyan-300 transition-colors flex-shrink-0 flex items-center gap-1">Get key <ExternalLink className="w-3 h-3" /></button></Link>
+            </div>
           </div>
         )}
 
@@ -245,7 +212,53 @@ export default function Dashboard() {
           <StatCard label="Avg. Session" value={`${Math.round(stats?.avgTimeOnSite ?? 0)}s`} sub="time on site" accent="#34d399" icon={Clock} />
         </div>
 
-        {/* Middle row */}
+        {/* Time-series chart */}
+        <div className="rounded-2xl border border-white/8 bg-white/[0.02] p-6">
+          <div className="flex items-center justify-between mb-6">
+            <div>
+              <h2 className="text-sm font-semibold text-white/80">Visitor Trends</h2>
+              <p className="text-xs text-white/30 font-mono mt-0.5">Last 7 days by persona</p>
+            </div>
+            <TrendingUp className="w-4 h-4 text-white/20" />
+          </div>
+          {hasChartData ? (
+            <ResponsiveContainer width="100%" height={200}>
+              <AreaChart data={timeseries} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
+                <defs>
+                  <linearGradient id="gradTech" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#22d3ee" stopOpacity={0.3} />
+                    <stop offset="95%" stopColor="#22d3ee" stopOpacity={0} />
+                  </linearGradient>
+                  <linearGradient id="gradBiz" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#818cf8" stopOpacity={0.3} />
+                    <stop offset="95%" stopColor="#818cf8" stopOpacity={0} />
+                  </linearGradient>
+                  <linearGradient id="gradCreator" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#fb923c" stopOpacity={0.3} />
+                    <stop offset="95%" stopColor="#fb923c" stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
+                <XAxis dataKey="date" tick={{ fill: 'rgba(255,255,255,0.25)', fontSize: 10, fontFamily: 'monospace' }} axisLine={false} tickLine={false} />
+                <YAxis tick={{ fill: 'rgba(255,255,255,0.25)', fontSize: 10, fontFamily: 'monospace' }} axisLine={false} tickLine={false} allowDecimals={false} />
+                <Tooltip content={<CustomTooltip />} />
+                <Legend wrapperStyle={{ fontSize: '11px', fontFamily: 'monospace', color: 'rgba(255,255,255,0.4)' }} />
+                <Area type="monotone" dataKey="technical" stroke="#22d3ee" strokeWidth={2} fill="url(#gradTech)" name="Technical" dot={false} />
+                <Area type="monotone" dataKey="business" stroke="#818cf8" strokeWidth={2} fill="url(#gradBiz)" name="Business" dot={false} />
+                <Area type="monotone" dataKey="creator" stroke="#fb923c" strokeWidth={2} fill="url(#gradCreator)" name="Creator" dot={false} />
+              </AreaChart>
+            </ResponsiveContainer>
+          ) : (
+            <div className="h-[200px] flex items-center justify-center">
+              <div className="text-center">
+                <TrendingUp className="w-8 h-8 text-white/8 mx-auto mb-2" />
+                <p className="text-xs text-white/25 font-mono">Chart populates once visitors arrive</p>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Middle row — persona breakdown + live feed */}
         <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
           <div className="lg:col-span-2 rounded-2xl border border-white/8 bg-white/[0.02] p-6">
             <div className="flex items-center justify-between mb-6">
@@ -260,7 +273,7 @@ export default function Dashboard() {
                 <PersonaBar key={f.persona} persona={f.persona} count={f.count} total={stats?.totalVisitors ?? 0} convRate={f.conversionRate ?? 0} confidence={f.avgConfidence ?? 0} />
               ))}
               {(!funnel || funnel.length === 0) && (
-                <div className="text-center py-12 text-xs text-white/25 font-mono">No data yet — visit the live site to generate signals</div>
+                <div className="text-center py-12 text-xs text-white/25 font-mono">No data yet</div>
               )}
             </div>
           </div>
@@ -274,9 +287,7 @@ export default function Dashboard() {
               <Activity className="w-4 h-4 text-white/20 animate-pulse" />
             </div>
             <div className="space-y-2 max-h-[420px] overflow-y-auto pr-1 [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-track]:bg-white/5 [&::-webkit-scrollbar-thumb]:bg-white/10 [&::-webkit-scrollbar-thumb]:rounded-full">
-              {recent?.map((visitor) => (
-                <ActivityRow key={visitor.id} visitor={visitor} />
-              ))}
+              {recent?.map((v) => <ActivityRow key={v.id} visitor={v} />)}
               {(!recent || recent.length === 0) && (
                 <div className="text-center py-16 text-xs text-white/25 font-mono flex flex-col items-center gap-3">
                   <Radio className="w-6 h-6 text-white/10 animate-pulse" />
@@ -288,18 +299,19 @@ export default function Dashboard() {
         </div>
 
         {/* Install CTA */}
-        <div className="rounded-2xl border border-cyan-700/20 bg-cyan-950/10 p-6 flex flex-col sm:flex-row items-center justify-between gap-4">
-          <div>
-            <div className="font-semibold text-white text-sm mb-1">Ready to personalize your own site?</div>
-            <p className="text-xs text-white/35 font-mono">Get an API key and drop one script tag onto any website.</p>
+        {!apiKey && (
+          <div className="rounded-2xl border border-cyan-700/20 bg-cyan-950/10 p-6 flex flex-col sm:flex-row items-center justify-between gap-4">
+            <div>
+              <div className="font-semibold text-white text-sm mb-1">Ready to personalize your own site?</div>
+              <p className="text-xs text-white/35 font-mono">Get an API key and drop one script tag onto any website.</p>
+            </div>
+            <Link href="/start">
+              <button className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-black font-bold text-sm transition-all shadow-[0_0_30px_rgba(34,211,238,0.2)] whitespace-nowrap">
+                Get Started Free <ExternalLink className="w-4 h-4" />
+              </button>
+            </Link>
           </div>
-          <Link href="/start">
-            <button className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-black font-bold text-sm transition-all shadow-[0_0_30px_rgba(34,211,238,0.2)] whitespace-nowrap">
-              Get Started Free
-              <ExternalLink className="w-4 h-4" />
-            </button>
-          </Link>
-        </div>
+        )}
 
         <footer className="text-center text-[10px] font-mono text-white/15 pb-4">
           SHIFT · Visitor Personalization Engine · Updates every 10s

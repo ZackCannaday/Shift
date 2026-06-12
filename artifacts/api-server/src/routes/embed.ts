@@ -5,20 +5,40 @@ import { db, apiKeysTable, visitorsTable } from "@workspace/db";
 
 const router: IRouter = Router();
 
-const DetectEmbedBody = z.object({
-  key: z.string().startsWith("sk_live_"),
-  sessionId: z.string().min(1).max(200),
-  pageUrl: z.string().optional(),
-  pageTitle: z.string().optional(),
-  referrer: z.string().optional(),
-  utmSource: z.string().optional(),
-  utmMedium: z.string().optional(),
-  utmCampaign: z.string().optional(),
-  userAgent: z.string().optional(),
-  deviceType: z.enum(["mobile", "tablet", "desktop"]).optional(),
-});
+// ─── In-memory rate limiter ───────────────────────────────────────────────────
+// 100 requests per hour per API key (resets per rolling window)
+const RATE_LIMIT = 100;
+const RATE_WINDOW_MS = 60 * 60 * 1000; // 1 hour
 
-// ─── Rule-based persona detection (same logic as visitors route) ──────────────
+const rateLimitStore = new Map<string, { count: number; resetAt: number }>();
+
+// Clean up expired entries every 10 minutes to prevent memory leak
+setInterval(() => {
+  const now = Date.now();
+  for (const [k, v] of rateLimitStore.entries()) {
+    if (now > v.resetAt) rateLimitStore.delete(k);
+  }
+}, 10 * 60 * 1000);
+
+function checkRateLimit(key: string): { allowed: boolean; remaining: number; resetAt: number } {
+  const now = Date.now();
+  const entry = rateLimitStore.get(key);
+
+  if (!entry || now > entry.resetAt) {
+    const resetAt = now + RATE_WINDOW_MS;
+    rateLimitStore.set(key, { count: 1, resetAt });
+    return { allowed: true, remaining: RATE_LIMIT - 1, resetAt };
+  }
+
+  if (entry.count >= RATE_LIMIT) {
+    return { allowed: false, remaining: 0, resetAt: entry.resetAt };
+  }
+
+  entry.count++;
+  return { allowed: true, remaining: RATE_LIMIT - entry.count, resetAt: entry.resetAt };
+}
+
+// ─── Persona detection helpers ────────────────────────────────────────────────
 
 const FUNNEL_CONTENT = {
   technical: {
@@ -61,7 +81,7 @@ function ruleBasedDetect(signals: string): { persona: "technical" | "business" |
   return { persona: "creator", confidence: Math.min(0.95, 0.5 + creator / total * 0.6) };
 }
 
-async function tryOpenAI(signals: string, data: z.infer<typeof DetectEmbedBody>) {
+async function tryOpenAI(data: z.infer<typeof DetectEmbedBody>) {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey || !apiKey.startsWith("sk-")) return null;
   try {
@@ -69,11 +89,24 @@ async function tryOpenAI(signals: string, data: z.infer<typeof DetectEmbedBody>)
     const client = new OpenAI({ apiKey });
     const prompt = `Analyze visitor signals and return JSON only:
 {"persona":"technical"|"business"|"creator","confidence":0.0-1.0,"reasoning":"one sentence","headline":"max 10 words","subheadline":"max 20 words","ctaText":"3-5 words","funnelTheme":"short label"}
-Signals: referrer=${data.referrer||"direct"} utm_source=${data.utmSource||"none"} device=${data.deviceType||"unknown"} ua=${(data.userAgent||"").slice(0,120)}`;
+Signals: referrer=${data.referrer || "direct"} utm_source=${data.utmSource || "none"} device=${data.deviceType || "unknown"} ua=${(data.userAgent || "").slice(0, 120)}`;
     const completion = await client.chat.completions.create({ model: "gpt-4o-mini", max_tokens: 256, messages: [{ role: "user", content: prompt }] });
     return JSON.parse(completion.choices[0]?.message?.content ?? "{}");
   } catch { return null; }
 }
+
+const DetectEmbedBody = z.object({
+  key: z.string().startsWith("sk_live_"),
+  sessionId: z.string().min(1).max(200),
+  pageUrl: z.string().optional(),
+  pageTitle: z.string().optional(),
+  referrer: z.string().optional(),
+  utmSource: z.string().optional(),
+  utmMedium: z.string().optional(),
+  utmCampaign: z.string().optional(),
+  userAgent: z.string().optional(),
+  deviceType: z.enum(["mobile", "tablet", "desktop"]).optional(),
+});
 
 router.post("/embed/detect", async (req, res): Promise<void> => {
   const parsed = DetectEmbedBody.safeParse(req.body);
@@ -91,13 +124,27 @@ router.post("/embed/detect", async (req, res): Promise<void> => {
     return;
   }
 
+  // Rate limit check (per API key)
+  const rl = checkRateLimit(data.key);
+  res.setHeader("X-RateLimit-Limit", RATE_LIMIT);
+  res.setHeader("X-RateLimit-Remaining", rl.remaining);
+  res.setHeader("X-RateLimit-Reset", Math.ceil(rl.resetAt / 1000));
+
+  if (!rl.allowed) {
+    res.status(429).json({
+      error: "Rate limit exceeded",
+      message: `Free tier allows ${RATE_LIMIT} detections per hour. Resets at ${new Date(rl.resetAt).toISOString()}.`,
+      retryAfter: Math.ceil((rl.resetAt - Date.now()) / 1000),
+    });
+    return;
+  }
+
   // Update lastUsedAt in background
   db.update(apiKeysTable).set({ lastUsedAt: new Date() }).where(eq(apiKeysTable.key, data.key)).catch(() => {});
 
   const signals = [data.referrer, data.utmSource, data.utmMedium, data.utmCampaign, data.userAgent, data.pageTitle].filter(Boolean).join(" ");
 
-  // Try AI, fall back to rules
-  const aiResult = await tryOpenAI(signals, data);
+  const aiResult = await tryOpenAI(data);
 
   let persona: "technical" | "business" | "creator";
   let confidence: number;
@@ -127,7 +174,6 @@ router.post("/embed/detect", async (req, res): Promise<void> => {
     funnelTheme = content.funnelTheme;
   }
 
-  // Upsert visitor
   let visitorId: number | null = null;
   try {
     const existing = await db.select().from(visitorsTable).where(eq(visitorsTable.sessionId, data.sessionId)).limit(1);

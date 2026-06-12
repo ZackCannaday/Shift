@@ -5,6 +5,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import Home from "@/pages/home";
 import Dashboard from "@/pages/dashboard";
 import Start from "@/pages/start";
+import Login from "@/pages/login";
 import NotFound from "@/pages/not-found";
 import { useEffect } from "react";
 
@@ -16,6 +17,7 @@ function Router() {
       <Route path="/" component={Home} />
       <Route path="/dashboard" component={Dashboard} />
       <Route path="/start" component={Start} />
+      <Route path="/login" component={Login} />
       <Route component={NotFound} />
     </Switch>
   );
