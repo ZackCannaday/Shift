@@ -25,7 +25,7 @@ router.get("/dashboard/stats", async (req, res): Promise<void> => {
   res.json({
     totalVisitors: total,
     totalConverted: converted,
-    conversionRate: total > 0 ? Math.round((converted / total) * 1000) / 10 : 0,
+    conversionRate: total > 0 ? converted / total : 0,
     uniquePersonas,
     avgTimeOnSite: totals.avgTime ? Number(totals.avgTime) : null,
     todayVisitors: Number(totals.todayTotal ?? 0),
@@ -48,7 +48,7 @@ router.get("/dashboard/funnel-breakdown", async (req, res): Promise<void> => {
       persona: r.persona,
       count: total,
       converted: conv,
-      conversionRate: total > 0 ? Math.round((conv / total) * 1000) / 10 : 0,
+      conversionRate: total > 0 ? conv / total : 0,
       avgConfidence: r.avgConfidence ? Math.round(Number(r.avgConfidence) * 100) / 100 : null,
     };
   });
