@@ -1,9 +1,11 @@
 import { pgTable, text, serial, timestamp, boolean, real, integer } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
+import { apiKeysTable } from "./api-keys";
 
 export const visitorsTable = pgTable("visitors", {
   id: serial("id").primaryKey(),
+  apiKeyId: integer("api_key_id").references(() => apiKeysTable.id),
   sessionId: text("session_id").notNull().unique(),
   referrer: text("referrer"),
   utmSource: text("utm_source"),

@@ -1,24 +1,62 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Link } from "wouter";
-import {
-  useGetDashboardStats,
-  useGetFunnelBreakdown,
-  useGetRecentActivity,
-  getGetDashboardStatsQueryKey,
-  getGetFunnelBreakdownQueryKey,
-  getGetRecentActivityQueryKey,
-} from "@workspace/api-client-react";
+import { useQuery } from "@tanstack/react-query";
 import {
   ArrowLeft, Users, MousePointerClick, Percent, Clock,
-  Activity, User, MapPin, Laptop, Terminal, Briefcase,
-  Paintbrush, Radio, TrendingUp,
+  Activity, MapPin, Laptop, Terminal, Briefcase,
+  Paintbrush, Radio, TrendingUp, Key, ExternalLink,
 } from "lucide-react";
 
-const PERSONA = {
+const PERSONA: Record<string, { color: string; bg: string; border: string; label: string; icon: React.ElementType }> = {
   technical: { color: "#22d3ee", bg: "rgba(34,211,238,0.08)", border: "rgba(34,211,238,0.2)", label: "Technical", icon: Terminal },
   business: { color: "#818cf8", bg: "rgba(129,140,248,0.08)", border: "rgba(129,140,248,0.2)", label: "Business", icon: Briefcase },
   creator: { color: "#fb923c", bg: "rgba(251,146,60,0.08)", border: "rgba(251,146,60,0.2)", label: "Creator", icon: Paintbrush },
 };
+
+const DEFAULT_PERSONA = { color: "#94a3b8", bg: "rgba(148,163,184,0.08)", border: "rgba(148,163,184,0.2)", label: "Unknown", icon: Activity };
+
+function getPersona(p: string) { return PERSONA[p] ?? DEFAULT_PERSONA; }
+
+function apiUrl(path: string, apiKey: string | null) {
+  const base = `/api${path}`;
+  return apiKey ? `${base}?apiKey=${encodeURIComponent(apiKey)}` : base;
+}
+
+async function apiFetch<T>(url: string): Promise<T> {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
+interface DashboardStats {
+  totalVisitors: number;
+  totalConverted: number;
+  conversionRate: number;
+  uniquePersonas: number;
+  avgTimeOnSite: number | null;
+  todayVisitors: number;
+  todayConverted: number;
+}
+
+interface FunnelStat {
+  persona: string;
+  count: number;
+  conversionRate: number;
+  avgConfidence: number | null;
+}
+
+interface Visitor {
+  id: number;
+  sessionId: string;
+  persona: string;
+  personaConfidence: number | null;
+  referrer: string | null;
+  deviceType: string | null;
+  utmSource: string | null;
+  converted: boolean;
+  timeOnSite: number | null;
+  createdAt: string;
+}
 
 function StatCard({ label, value, sub, accent, icon: Icon }: {
   label: string; value: string | number; sub: string; accent: string; icon: React.ElementType;
@@ -31,7 +69,7 @@ function StatCard({ label, value, sub, accent, icon: Icon }: {
           <Icon className="w-4 h-4" style={{ color: accent }} />
         </div>
       </div>
-      <div className="text-4xl font-black tracking-tight" style={{ color: '#f8fafc' }}>{value}</div>
+      <div className="text-4xl font-black tracking-tight text-white">{value}</div>
       <p className="text-xs font-mono text-white/30">{sub}</p>
     </div>
   );
@@ -40,12 +78,11 @@ function StatCard({ label, value, sub, accent, icon: Icon }: {
 function PersonaBar({ persona, count, total, convRate, confidence }: {
   persona: string; count: number; total: number; convRate: number; confidence: number;
 }) {
-  const cfg = PERSONA[persona as keyof typeof PERSONA] ?? PERSONA.business;
+  const cfg = getPersona(persona);
   const Icon = cfg.icon;
   const pct = total > 0 ? Math.round((count / total) * 100) : 0;
-
   return (
-    <div className="rounded-xl border p-4 space-y-3 transition-colors hover:border-white/15" style={{ backgroundColor: cfg.bg, borderColor: cfg.border }}>
+    <div className="rounded-xl border p-4 space-y-3 hover:border-white/15 transition-colors" style={{ backgroundColor: cfg.bg, borderColor: cfg.border }}>
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ backgroundColor: `${cfg.color}20`, border: `1px solid ${cfg.color}30` }}>
@@ -55,11 +92,9 @@ function PersonaBar({ persona, count, total, convRate, confidence }: {
         </div>
         <span className="text-2xl font-black" style={{ color: cfg.color }}>{count}</span>
       </div>
-
       <div className="h-1.5 rounded-full bg-white/5 overflow-hidden">
         <div className="h-full rounded-full transition-all duration-1000" style={{ width: `${pct}%`, backgroundColor: cfg.color, boxShadow: `0 0 8px ${cfg.color}80` }} />
       </div>
-
       <div className="flex justify-between text-[11px] font-mono text-white/35">
         <span>{pct}% of traffic</span>
         <span>{(convRate * 100).toFixed(1)}% converted</span>
@@ -69,25 +104,20 @@ function PersonaBar({ persona, count, total, convRate, confidence }: {
   );
 }
 
-function ActivityRow({ visitor }: { visitor: any }) {
-  const cfg = PERSONA[visitor.persona as keyof typeof PERSONA] ?? PERSONA.business;
+function ActivityRow({ visitor }: { visitor: Visitor }) {
+  const cfg = getPersona(visitor.persona);
   const Icon = cfg.icon;
-
   let hostname = "";
   try { hostname = visitor.referrer ? new URL(visitor.referrer).hostname : ""; } catch {}
-
-  const time = new Date(visitor.createdAt);
-  const timeStr = time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-
+  const timeStr = new Date(visitor.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   return (
-    <div className="flex items-center gap-4 p-3 rounded-xl border border-white/5 bg-white/[0.02] hover:bg-white/[0.04] hover:border-white/10 transition-all group">
+    <div className="flex items-center gap-4 p-3 rounded-xl border border-white/5 bg-white/[0.02] hover:bg-white/[0.04] hover:border-white/10 transition-all">
       <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style={{ backgroundColor: cfg.bg, border: `1px solid ${cfg.border}` }}>
         <Icon className="w-3.5 h-3.5" style={{ color: cfg.color }} />
       </div>
-
       <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2 mb-0.5">
-          <span className="font-mono text-xs text-white/40">{visitor.sessionId.split('-')[0]}···</span>
+        <div className="flex items-center gap-2 mb-0.5 flex-wrap">
+          <span className="font-mono text-xs text-white/40">{visitor.sessionId.slice(0, 12)}···</span>
           <span className="text-[10px] font-mono px-1.5 py-0.5 rounded" style={{ backgroundColor: cfg.bg, color: cfg.color, border: `1px solid ${cfg.border}` }}>
             {cfg.label} · {Math.round((visitor.personaConfidence || 0) * 100)}%
           </span>
@@ -101,7 +131,6 @@ function ActivityRow({ visitor }: { visitor: any }) {
           {visitor.utmSource && <span className="bg-white/5 px-1.5 py-0.5 rounded">utm={visitor.utmSource}</span>}
         </div>
       </div>
-
       <div className="text-right flex-shrink-0">
         <div className="text-xs font-mono text-white/30">{timeStr}</div>
         {visitor.timeOnSite && <div className="text-[10px] font-mono text-white/20">{visitor.timeOnSite}s</div>}
@@ -112,33 +141,53 @@ function ActivityRow({ visitor }: { visitor: any }) {
 
 export default function Dashboard() {
   const [now, setNow] = useState(new Date());
+  const [apiKey, setApiKey] = useState<string | null>(null);
+  const [apiName, setApiName] = useState<string | null>(null);
 
   useEffect(() => {
     const t = setInterval(() => setNow(new Date()), 1000);
     return () => clearInterval(t);
   }, []);
 
-  const { data: stats } = useGetDashboardStats({ query: { refetchInterval: 10000, queryKey: getGetDashboardStatsQueryKey() } });
-  const { data: funnel } = useGetFunnelBreakdown({ query: { refetchInterval: 10000, queryKey: getGetFunnelBreakdownQueryKey() } });
-  const { data: recent } = useGetRecentActivity({ query: { refetchInterval: 10000, queryKey: getGetRecentActivityQueryKey() } });
+  useEffect(() => {
+    const key = localStorage.getItem("shift_api_key");
+    const name = localStorage.getItem("shift_api_name");
+    setApiKey(key);
+    setApiName(name);
+  }, []);
+
+  const { data: stats } = useQuery<DashboardStats>({
+    queryKey: ["dashboard-stats", apiKey],
+    queryFn: () => apiFetch(apiUrl("/dashboard/stats", apiKey)),
+    refetchInterval: 10000,
+  });
+
+  const { data: funnel } = useQuery<FunnelStat[]>({
+    queryKey: ["funnel-breakdown", apiKey],
+    queryFn: () => apiFetch(apiUrl("/dashboard/funnel-breakdown", apiKey)),
+    refetchInterval: 10000,
+  });
+
+  const { data: recent } = useQuery<Visitor[]>({
+    queryKey: ["recent-activity", apiKey],
+    queryFn: () => apiFetch(apiUrl("/dashboard/recent-activity", apiKey)),
+    refetchInterval: 10000,
+  });
 
   const convRate = ((stats?.conversionRate || 0) * 100).toFixed(1);
 
   return (
     <div className="min-h-screen w-full bg-[#030712] text-white font-sans">
-      {/* Ambient glow top */}
       <div className="fixed top-0 left-1/2 -translate-x-1/2 w-[800px] h-[200px] bg-indigo-600/5 blur-[80px] pointer-events-none" />
 
       <div className="max-w-7xl mx-auto px-6 py-8 space-y-8">
 
         {/* Header */}
-        <header className="flex items-start justify-between">
+        <header className="flex items-start justify-between gap-4">
           <div>
             <div className="flex items-center gap-3 mb-1">
-              <div className="flex items-center gap-1.5">
-                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                <span className="text-[10px] font-mono text-emerald-400/70 uppercase tracking-widest">Live</span>
-              </div>
+              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+              <span className="text-[10px] font-mono text-emerald-400/70 uppercase tracking-widest">Live</span>
               <span className="text-[10px] font-mono text-white/20">{now.toLocaleTimeString()}</span>
             </div>
             <h1 className="text-2xl font-black tracking-tight text-white flex items-center gap-2">
@@ -147,13 +196,46 @@ export default function Dashboard() {
             </h1>
             <p className="text-sm text-white/30 font-mono mt-1">Real-time personalization telemetry</p>
           </div>
-          <Link href="/">
-            <button className="flex items-center gap-2 text-xs font-mono text-white/40 hover:text-white/80 transition-colors px-4 py-2.5 rounded-xl border border-white/10 hover:border-white/20 bg-white/[0.02]">
-              <ArrowLeft className="w-3.5 h-3.5" />
-              Live Site
-            </button>
-          </Link>
+          <div className="flex items-center gap-3">
+            <Link href="/">
+              <button className="flex items-center gap-2 text-xs font-mono text-white/40 hover:text-white/80 transition-colors px-4 py-2.5 rounded-xl border border-white/10 hover:border-white/20 bg-white/[0.02]">
+                <ArrowLeft className="w-3.5 h-3.5" />
+                Live Site
+              </button>
+            </Link>
+          </div>
         </header>
+
+        {/* API Key status bar */}
+        {apiKey ? (
+          <div className="flex items-center justify-between gap-4 px-4 py-3 rounded-xl border border-indigo-700/20 bg-indigo-950/10">
+            <div className="flex items-center gap-3 min-w-0">
+              <Key className="w-3.5 h-3.5 text-indigo-400 flex-shrink-0" />
+              <div className="min-w-0">
+                <span className="text-xs font-mono text-white/50">Filtering by key for </span>
+                <span className="text-xs font-semibold text-white/80">{apiName ?? "your account"}</span>
+                <span className="text-xs font-mono text-white/25 ml-2 hidden sm:inline">{apiKey.slice(0, 20)}···</span>
+              </div>
+            </div>
+            <Link href="/start">
+              <button className="flex items-center gap-1.5 text-[11px] font-mono text-indigo-400 hover:text-indigo-300 transition-colors flex-shrink-0">
+                Manage key <ExternalLink className="w-3 h-3" />
+              </button>
+            </Link>
+          </div>
+        ) : (
+          <div className="flex items-center justify-between gap-4 px-4 py-3 rounded-xl border border-white/8 bg-white/[0.02]">
+            <div className="flex items-center gap-3">
+              <Key className="w-3.5 h-3.5 text-white/30 flex-shrink-0" />
+              <span className="text-xs font-mono text-white/30">Showing all visitors · Get an API key to filter by your site</span>
+            </div>
+            <Link href="/start">
+              <button className="flex items-center gap-1.5 text-[11px] font-mono text-cyan-400 hover:text-cyan-300 transition-colors flex-shrink-0">
+                Get key <ExternalLink className="w-3 h-3" />
+              </button>
+            </Link>
+          </div>
+        )}
 
         {/* Stat Cards */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
@@ -165,8 +247,6 @@ export default function Dashboard() {
 
         {/* Middle row */}
         <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
-
-          {/* Funnel breakdown */}
           <div className="lg:col-span-2 rounded-2xl border border-white/8 bg-white/[0.02] p-6">
             <div className="flex items-center justify-between mb-6">
               <div>
@@ -177,14 +257,7 @@ export default function Dashboard() {
             </div>
             <div className="space-y-3">
               {funnel?.map((f) => (
-                <PersonaBar
-                  key={f.persona}
-                  persona={f.persona}
-                  count={f.count}
-                  total={stats?.totalVisitors ?? 0}
-                  convRate={f.conversionRate ?? 0}
-                  confidence={f.avgConfidence ?? 0}
-                />
+                <PersonaBar key={f.persona} persona={f.persona} count={f.count} total={stats?.totalVisitors ?? 0} convRate={f.conversionRate ?? 0} confidence={f.avgConfidence ?? 0} />
               ))}
               {(!funnel || funnel.length === 0) && (
                 <div className="text-center py-12 text-xs text-white/25 font-mono">No data yet — visit the live site to generate signals</div>
@@ -192,7 +265,6 @@ export default function Dashboard() {
             </div>
           </div>
 
-          {/* Activity feed */}
           <div className="lg:col-span-3 rounded-2xl border border-white/8 bg-white/[0.02] p-6">
             <div className="flex items-center justify-between mb-6">
               <div>
@@ -201,7 +273,6 @@ export default function Dashboard() {
               </div>
               <Activity className="w-4 h-4 text-white/20 animate-pulse" />
             </div>
-
             <div className="space-y-2 max-h-[420px] overflow-y-auto pr-1 [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-track]:bg-white/5 [&::-webkit-scrollbar-thumb]:bg-white/10 [&::-webkit-scrollbar-thumb]:rounded-full">
               {recent?.map((visitor) => (
                 <ActivityRow key={visitor.id} visitor={visitor} />
@@ -214,14 +285,25 @@ export default function Dashboard() {
               )}
             </div>
           </div>
-
         </div>
 
-        {/* Footer */}
+        {/* Install CTA */}
+        <div className="rounded-2xl border border-cyan-700/20 bg-cyan-950/10 p-6 flex flex-col sm:flex-row items-center justify-between gap-4">
+          <div>
+            <div className="font-semibold text-white text-sm mb-1">Ready to personalize your own site?</div>
+            <p className="text-xs text-white/35 font-mono">Get an API key and drop one script tag onto any website.</p>
+          </div>
+          <Link href="/start">
+            <button className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-black font-bold text-sm transition-all shadow-[0_0_30px_rgba(34,211,238,0.2)] whitespace-nowrap">
+              Get Started Free
+              <ExternalLink className="w-4 h-4" />
+            </button>
+          </Link>
+        </div>
+
         <footer className="text-center text-[10px] font-mono text-white/15 pb-4">
           SHIFT · Visitor Personalization Engine · Updates every 10s
         </footer>
-
       </div>
     </div>
   );
