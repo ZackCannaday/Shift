@@ -1,10 +1,11 @@
 import { Router, type IRouter } from "express";
-import { randomBytes } from "crypto";
-import { eq } from "drizzle-orm";
+import { and, eq, gt } from "drizzle-orm";
 import { z } from "zod";
-import { db, apiKeysTable, dashboardSessionsTable } from "@workspace/db";
+import { apiKeysTable, db, dashboardSessionsTable, organizationMembersTable, usersTable } from "@workspace/db";
 import { createDashboardSession } from "../lib/dashboard-session";
 import { hashToken } from "../lib/security";
+import { canDeliverMagicLinks, issueMagicLink } from "../lib/magic-link";
+import { consumeRateLimit } from "../lib/rate-limit";
 import { requireDashboardSession, type AuthenticatedRequest } from "../middlewares/dashboard-auth";
 
 const router: IRouter = Router();
@@ -25,9 +26,23 @@ router.post("/auth/request", async (req, res): Promise<void> => {
     return;
   }
 
-  const { email } = parsed.data;
-  const records = await db.select().from(apiKeysTable)
-    .where(eq(apiKeysTable.email, email.toLowerCase().trim()))
+  if (!canDeliverMagicLinks()) {
+    res.status(503).json({ error: "Email login is not configured" });
+    return;
+  }
+
+  const email = parsed.data.email.toLowerCase().trim();
+  const [ipLimit, emailLimit] = await Promise.all([
+    consumeRateLimit("auth-request-ip", req.ip ?? "unknown", 20, 60 * 60 * 1000),
+    consumeRateLimit("auth-request-email", email, 5, 60 * 60 * 1000),
+  ]);
+  if (!ipLimit.allowed || !emailLimit.allowed) {
+    res.status(429).json({ error: "Too many login requests. Please try again later." });
+    return;
+  }
+
+  const records = await db.select().from(usersTable)
+    .where(eq(usersTable.email, email))
     .limit(1);
 
   if (records.length === 0) {
@@ -37,19 +52,14 @@ router.post("/auth/request", async (req, res): Promise<void> => {
   }
 
   const record = records[0];
-  const token = randomBytes(20).toString("hex"); // sent to the account owner only
-  const expiry = new Date(Date.now() + 30 * 60 * 1000); // 30 min
-
-  await db.update(apiKeysTable)
-    .set({ loginToken: hashToken(token), loginTokenExpiry: expiry })
-    .where(eq(apiKeysTable.id, record.id));
-
-  // An email adapter can consume this event in production. Never return a login
-  // token unless a developer has explicitly enabled local-only auth links.
-  req.log.info({ accountId: record.id }, "Magic login link requested");
-  res.json(process.env.ALLOW_DEV_AUTH_TOKENS === "true"
-    ? { sent: true, _devToken: token, _devName: record.name }
-    : { sent: true });
+  try {
+    const result = await issueMagicLink(record);
+    req.log.info({ userId: record.id }, "Magic login link requested");
+    res.json(result);
+  } catch (error) {
+    req.log.error({ err: error, userId: record.id }, "Magic login delivery failed");
+    res.status(502).json({ error: "Login email could not be delivered. Please try again." });
+  }
 });
 
 // POST /api/auth/verify — validate magic token, return key info
@@ -61,42 +71,55 @@ router.post("/auth/verify", async (req, res): Promise<void> => {
   }
 
   const { token } = parsed.data;
-  const [record] = await db.select().from(apiKeysTable)
-    .where(eq(apiKeysTable.loginToken, hashToken(token)))
-    .limit(1);
+  const [record] = await db.update(usersTable)
+    .set({ loginToken: null, loginTokenExpiry: null, emailVerifiedAt: new Date() })
+    .where(and(
+      eq(usersTable.loginToken, hashToken(token)),
+      gt(usersTable.loginTokenExpiry, new Date()),
+    ))
+    .returning();
 
   if (!record) {
     res.status(401).json({ error: "Invalid or expired login link" });
     return;
   }
 
-  if (!record.loginTokenExpiry || new Date() > record.loginTokenExpiry) {
-    res.status(401).json({ error: "Login link has expired. Please request a new one." });
+  const [site] = await db.select({
+    id: apiKeysTable.id,
+    key: apiKeysTable.key,
+    name: apiKeysTable.name,
+    website: apiKeysTable.website,
+    isActive: apiKeysTable.isActive,
+  }).from(organizationMembersTable)
+    .innerJoin(apiKeysTable, eq(apiKeysTable.organizationId, organizationMembersTable.organizationId))
+    .where(eq(organizationMembersTable.userId, record.id))
+    .limit(1);
+
+  if (!site?.isActive) {
+    res.status(403).json({ error: "No active site is available for this account" });
     return;
   }
 
-  if (!record.isActive) {
-    res.status(403).json({ error: "This account is inactive" });
-    return;
-  }
-
-  // Consume the token (one-time use)
-  await db.update(apiKeysTable)
-    .set({ loginToken: null, loginTokenExpiry: null })
-    .where(eq(apiKeysTable.id, record.id));
-
-  await createDashboardSession(res, record.id);
+  await createDashboardSession(res, record.id, site.id);
   res.json({
-    name: record.name,
+    name: site.name,
     email: record.email,
-    website: record.website,
+    website: site.website,
+    key: site.key,
   });
 });
 
 router.get("/auth/session", requireDashboardSession, async (req: AuthenticatedRequest, res): Promise<void> => {
-  const [record] = await db.select({ name: apiKeysTable.name, email: apiKeysTable.email, website: apiKeysTable.website })
-    .from(apiKeysTable)
-    .where(eq(apiKeysTable.id, req.shiftSiteId!))
+  const [record] = await db.select({
+    name: apiKeysTable.name,
+    email: usersTable.email,
+    website: apiKeysTable.website,
+    key: apiKeysTable.key,
+    userId: usersTable.id,
+  }).from(dashboardSessionsTable)
+    .innerJoin(usersTable, eq(usersTable.id, dashboardSessionsTable.userId))
+    .innerJoin(apiKeysTable, eq(apiKeysTable.id, dashboardSessionsTable.apiKeyId))
+    .where(eq(dashboardSessionsTable.id, req.shiftSessionId!))
     .limit(1);
   if (!record) {
     res.status(401).json({ error: "Account not found" });
@@ -106,7 +129,7 @@ router.get("/auth/session", requireDashboardSession, async (req: AuthenticatedRe
 });
 
 router.post("/auth/logout", requireDashboardSession, async (req: AuthenticatedRequest, res): Promise<void> => {
-  await db.delete(dashboardSessionsTable).where(eq(dashboardSessionsTable.apiKeyId, req.shiftSiteId!));
+  await db.delete(dashboardSessionsTable).where(eq(dashboardSessionsTable.id, req.shiftSessionId!));
   res.clearCookie("shift_session", { path: "/" });
   res.status(204).send();
 });

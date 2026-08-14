@@ -5,10 +5,11 @@ import { hashToken } from "./security";
 
 const SESSION_TTL_MS = 14 * 24 * 60 * 60 * 1000;
 
-export async function createDashboardSession(res: Response, apiKeyId: number) {
+export async function createDashboardSession(res: Response, userId: number, apiKeyId: number) {
   const token = randomBytes(32).toString("base64url");
   const expiresAt = new Date(Date.now() + SESSION_TTL_MS);
   await db.insert(dashboardSessionsTable).values({
+    userId,
     apiKeyId,
     tokenHash: hashToken(token),
     expiresAt,

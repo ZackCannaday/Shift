@@ -22,11 +22,13 @@ app.use(
   }),
 );
 
-// Allow all cross-origin requests (embed script makes cross-origin requests)
-app.use(cors({ origin: true, credentials: true }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
+
+// Only the public embed API is cross-origin. Dashboard/session APIs remain
+// same-origin so credentialed requests are never reflected to arbitrary sites.
+app.use("/api/embed", cors({ origin: true, credentials: false }));
 
 // Serve the embeddable script at the root level (not under /api)
 app.get(["/shift.js", "/api/shift.js"], (_req, res) => {

@@ -5,32 +5,11 @@ import { db, apiKeysTable, visitorsTable } from "@workspace/db";
 import { personalizeWithProvider } from "../lib/ai-providers";
 import { ProviderName, ruleBasedPersonalization, type VisitorSignals } from "../lib/personalization";
 import { decryptSecret, sanitizeUrl } from "../lib/security";
+import { consumeRateLimit } from "../lib/rate-limit";
 
 const router: IRouter = Router();
 const RATE_LIMIT = 300;
 const RATE_WINDOW_MS = 60 * 60 * 1000;
-const rateLimitStore = new Map<string, { count: number; resetAt: number }>();
-
-setInterval(() => {
-  const now = Date.now();
-  for (const [key, value] of rateLimitStore.entries()) {
-    if (now > value.resetAt) rateLimitStore.delete(key);
-  }
-}, 10 * 60 * 1000).unref();
-
-function checkRateLimit(key: string) {
-  const now = Date.now();
-  const current = rateLimitStore.get(key);
-  if (!current || now > current.resetAt) {
-    const value = { count: 1, resetAt: now + RATE_WINDOW_MS };
-    rateLimitStore.set(key, value);
-    return { allowed: true, remaining: RATE_LIMIT - 1, resetAt: value.resetAt };
-  }
-  if (current.count >= RATE_LIMIT) return { allowed: false, remaining: 0, resetAt: current.resetAt };
-  current.count += 1;
-  return { allowed: true, remaining: RATE_LIMIT - current.count, resetAt: current.resetAt };
-}
-
 const PublicKey = z.string().refine(
   (value) => value.startsWith("pk_shift_") || value.startsWith("sk_live_"),
   "Invalid publishable key",
@@ -88,7 +67,7 @@ router.post("/embed/detect", async (req, res): Promise<void> => {
     return;
   }
 
-  const rateLimit = checkRateLimit(`${site.id}:${req.ip}`);
+  const rateLimit = await consumeRateLimit("embed-detect", `${site.id}:${req.ip ?? "unknown"}`, RATE_LIMIT, RATE_WINDOW_MS);
   res.setHeader("X-RateLimit-Limit", RATE_LIMIT);
   res.setHeader("X-RateLimit-Remaining", rateLimit.remaining);
   res.setHeader("X-RateLimit-Reset", Math.ceil(rateLimit.resetAt / 1000));
@@ -165,6 +144,11 @@ router.post("/embed/events", async (req, res): Promise<void> => {
   const site = await findSite(parsed.data.key);
   if (!site?.isActive || !isAllowedOrigin(req, site.website)) {
     res.status(403).json({ error: "Event rejected" });
+    return;
+  }
+  const rateLimit = await consumeRateLimit("embed-event", `${site.id}:${req.ip ?? "unknown"}`, RATE_LIMIT * 2, RATE_WINDOW_MS);
+  if (!rateLimit.allowed) {
+    res.status(429).json({ error: "Rate limit exceeded", retryAfter: Math.ceil((rateLimit.resetAt - Date.now()) / 1000) });
     return;
   }
   const where = and(eq(visitorsTable.apiKeyId, site.id), eq(visitorsTable.sessionId, parsed.data.sessionId));

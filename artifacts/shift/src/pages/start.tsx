@@ -1,6 +1,6 @@
-import { useState } from "react";
-import { Link } from "wouter";
-import { CheckCircle, Copy, ArrowRight, Code2, Globe, BarChart3, Zap, ChevronRight, Terminal } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Link, useLocation } from "wouter";
+import { CheckCircle, Copy, ArrowRight, Code2, Globe, BarChart3, Zap, ChevronRight, Terminal, Mail, ShieldCheck } from "lucide-react";
 
 const API_BASE = "/api";
 
@@ -10,7 +10,7 @@ interface ApiKeyResult {
   name: string;
   email: string;
   website?: string | null;
-  createdAt: string;
+  createdAt?: string;
 }
 
 function CopyButton({ text }: { text: string }) {
@@ -53,10 +53,41 @@ const STEPS = [
 ];
 
 export default function Start() {
+  const [, navigate] = useLocation();
   const [form, setForm] = useState({ name: "", email: "", website: "" });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<ApiKeyResult | null>(null);
+  const [verificationSent, setVerificationSent] = useState(false);
+  const [devToken, setDevToken] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetch(`${API_BASE}/auth/session`, { credentials: "include" })
+      .then(async (res) => res.ok ? res.json() : null)
+      .then((account) => { if (account?.key) setResult(account); })
+      .catch(() => {});
+  }, []);
+
+  const verifyToken = async () => {
+    if (!devToken) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch(`${API_BASE}/auth/verify`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token: devToken }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) { setError(data.error ?? "Verification failed"); return; }
+      navigate("/dashboard");
+    } catch {
+      setError("Network error. Please try again.");
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -78,8 +109,9 @@ export default function Start() {
         setError(data.error ?? "Something went wrong. Please try again.");
         return;
       }
-      const data: ApiKeyResult = await res.json();
-      setResult(data);
+      const data = await res.json();
+      setVerificationSent(true);
+      setDevToken(data._devToken ?? null);
     } catch {
       setError("Network error. Please check your connection and try again.");
     } finally {
@@ -145,7 +177,29 @@ export default function Start() {
           ))}
         </div>
 
-        {!result ? (
+        {verificationSent && !result ? (
+          <div className="rounded-2xl border border-emerald-700/30 bg-emerald-950/20 p-8 text-center" role="status">
+            <div className="w-12 h-12 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center mx-auto mb-5">
+              <Mail className="w-5 h-5 text-emerald-400" />
+            </div>
+            <h1 className="text-2xl font-black tracking-tight mb-2">Verify your email</h1>
+            <p className="text-sm text-white/40 font-mono leading-relaxed">
+              We sent a one-time verification link to {form.email}. Your publishable site key will be available after verification.
+            </p>
+            <div className="mt-5 flex items-center justify-center gap-2 text-[11px] font-mono text-white/30">
+              <ShieldCheck className="w-3.5 h-3.5 text-cyan-400" />
+              This prevents another person from claiming your workspace.
+            </div>
+            {devToken && (
+              <button onClick={verifyToken} disabled={loading} className="mt-6 w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-indigo-500 hover:bg-indigo-400 text-white font-semibold text-sm disabled:opacity-50">
+                {loading ? "Verifying…" : "Verify and open dashboard"}
+                {!loading && <ArrowRight className="w-4 h-4" />}
+              </button>
+            )}
+            {error && <p className="mt-4 text-xs text-red-400 font-mono">{error}</p>}
+            <button onClick={() => { setVerificationSent(false); setDevToken(null); setError(null); }} className="mt-5 text-xs font-mono text-white/30 hover:text-white/60">Use a different email</button>
+          </div>
+        ) : !result ? (
           /* ── Step 1: Form ── */
           <div>
             <div className="mb-10">
@@ -221,11 +275,11 @@ export default function Start() {
                 {loading ? (
                   <>
                     <div className="w-4 h-4 rounded-full border-2 border-black/30 border-t-black animate-spin" />
-                    Generating your key...
+                    Creating your workspace...
                   </>
                 ) : (
                   <>
-                    Generate My API Key
+                    Create and verify workspace
                     <ArrowRight className="w-4 h-4" />
                   </>
                 )}

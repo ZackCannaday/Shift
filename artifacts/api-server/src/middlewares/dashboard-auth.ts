@@ -1,10 +1,12 @@
 import type { NextFunction, Request, Response } from "express";
 import { and, eq, gt } from "drizzle-orm";
-import { db, dashboardSessionsTable } from "@workspace/db";
+import { apiKeysTable, db, dashboardSessionsTable, organizationMembersTable } from "@workspace/db";
 import { hashToken } from "../lib/security";
 
 export interface AuthenticatedRequest extends Request {
+  shiftUserId?: number;
   shiftSiteId?: number;
+  shiftSessionId?: number;
 }
 
 export async function requireDashboardSession(req: AuthenticatedRequest, res: Response, next: NextFunction) {
@@ -14,8 +16,17 @@ export async function requireDashboardSession(req: AuthenticatedRequest, res: Re
     return;
   }
 
-  const [session] = await db.select({ apiKeyId: dashboardSessionsTable.apiKeyId })
+  const [session] = await db.select({
+    id: dashboardSessionsTable.id,
+    userId: dashboardSessionsTable.userId,
+    apiKeyId: dashboardSessionsTable.apiKeyId,
+  })
     .from(dashboardSessionsTable)
+    .innerJoin(apiKeysTable, eq(apiKeysTable.id, dashboardSessionsTable.apiKeyId))
+    .innerJoin(organizationMembersTable, and(
+      eq(organizationMembersTable.organizationId, apiKeysTable.organizationId),
+      eq(organizationMembersTable.userId, dashboardSessionsTable.userId),
+    ))
     .where(and(
       eq(dashboardSessionsTable.tokenHash, hashToken(token)),
       gt(dashboardSessionsTable.expiresAt, new Date()),
@@ -28,6 +39,8 @@ export async function requireDashboardSession(req: AuthenticatedRequest, res: Re
     return;
   }
 
+  req.shiftSessionId = session.id;
+  req.shiftUserId = session.userId;
   req.shiftSiteId = session.apiKeyId;
   next();
 }
