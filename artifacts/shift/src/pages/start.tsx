@@ -198,9 +198,10 @@ export default function Start() {
                 />
               </div>
               <div>
-                <label className="block text-xs font-mono text-white/40 mb-1.5 uppercase tracking-wider">Your website <span className="text-white/20 normal-case">(optional)</span></label>
+                <label className="block text-xs font-mono text-white/40 mb-1.5 uppercase tracking-wider">Your website</label>
                 <input
                   type="url"
+                  required
                   placeholder="https://yoursite.com"
                   value={form.website}
                   onChange={e => setForm(f => ({ ...f, website: e.target.value }))}

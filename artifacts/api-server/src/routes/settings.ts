@@ -48,7 +48,14 @@ router.put("/settings/ai", async (req: AuthenticatedRequest, res): Promise<void>
     aiProvider: parsed.data.provider,
     aiModel: parsed.data.model || null,
   };
-  if (parsed.data.apiKey) values.aiApiKeyEncrypted = encryptSecret(parsed.data.apiKey);
+  if (parsed.data.apiKey) {
+    try {
+      values.aiApiKeyEncrypted = encryptSecret(parsed.data.apiKey);
+    } catch {
+      res.status(503).json({ error: "Provider credential encryption is not configured on this Shift server" });
+      return;
+    }
+  }
   if (parsed.data.provider === "rules") values.aiApiKeyEncrypted = null;
 
   await db.update(apiKeysTable).set(values).where(eq(apiKeysTable.id, req.shiftSiteId!));

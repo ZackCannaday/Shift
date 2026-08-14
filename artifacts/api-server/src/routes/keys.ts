@@ -10,7 +10,7 @@ const router: IRouter = Router();
 const CreateKeyBody = z.object({
   name: z.string().min(1).max(100),
   email: z.string().email(),
-  website: z.string().url().optional(),
+  website: z.string().url(),
 });
 
 router.post("/keys", async (req, res): Promise<void> => {
@@ -29,7 +29,7 @@ router.post("/keys", async (req, res): Promise<void> => {
       key,
       name,
       email,
-      website: website ?? null,
+      website,
     }).returning();
 
     await createDashboardSession(res, created.id);

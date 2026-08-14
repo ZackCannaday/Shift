@@ -81,10 +81,10 @@ export async function personalizeWithProvider(request: ProviderRequest): Promise
   }
 
   const data = await requestJson(
-    `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(request.apiKey)}`,
+    `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,
     {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", "x-goog-api-key": request.apiKey },
       body: JSON.stringify({
         contents: [{ role: "user", parts: [{ text: prompt }] }],
         generationConfig: {
