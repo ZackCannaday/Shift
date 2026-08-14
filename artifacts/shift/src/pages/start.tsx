@@ -65,6 +65,7 @@ export default function Start() {
     try {
       const res = await fetch(`${API_BASE}/keys`, {
         method: "POST",
+        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name: form.name.trim(),
@@ -79,9 +80,6 @@ export default function Start() {
       }
       const data: ApiKeyResult = await res.json();
       setResult(data);
-      // Store in localStorage for dashboard filtering
-      localStorage.setItem("shift_api_key", data.key);
-      localStorage.setItem("shift_api_name", data.name);
     } catch {
       setError("Network error. Please check your connection and try again.");
     } finally {
@@ -90,11 +88,11 @@ export default function Start() {
   };
 
   const scriptTag = result
-    ? `<script src="${window.location.origin}/api-server/shift.js"\n  data-shift-key="${result.key}"\n  data-shift-auto="true">\n</script>`
+    ? `<script src="${window.location.origin}/api/shift.js"\n  data-shift-key="${result.key}"\n  data-shift-auto="true">\n</script>`
     : "";
 
   const htmlExample = result
-    ? `<!DOCTYPE html>\n<html>\n<head>\n  <!-- Add Shift before </head> -->\n  <script src="${window.location.origin}/api-server/shift.js"\n    data-shift-key="${result.key}"\n    data-shift-auto="true">\n  </script>\n</head>\n<body>\n  <h1 data-shift-headline>Your default headline</h1>\n  <p data-shift-subheadline>Your default subheadline</p>\n  <button data-shift-cta>Get Started</button>\n</body>\n</html>`
+    ? `<!DOCTYPE html>\n<html>\n<head>\n  <!-- Add Shift before </head> -->\n  <script src="${window.location.origin}/api/shift.js"\n    data-shift-key="${result.key}"\n    data-shift-auto="true">\n  </script>\n</head>\n<body>\n  <h1 data-shift-headline>Your default headline</h1>\n  <p data-shift-subheadline>Your default subheadline</p>\n  <button data-shift-cta data-shift-conversion="primary_cta">Get Started</button>\n</body>\n</html>`
     : "";
 
   const jsExample = result
@@ -243,7 +241,7 @@ export default function Start() {
                 <CheckCircle className="w-5 h-5 text-emerald-400 flex-shrink-0" />
                 <div>
                   <div className="font-semibold text-white">Your API key is ready, {result.name.split(" ")[0]}!</div>
-                  <div className="text-xs text-white/40 font-mono mt-0.5">Save this key — you won't be able to see it again</div>
+                  <div className="text-xs text-white/40 font-mono mt-0.5">This publishable site key is safe to use in your embed tag</div>
                 </div>
               </div>
               <div className="flex items-center gap-3 bg-black/40 rounded-xl border border-white/8 px-4 py-3">
@@ -268,7 +266,7 @@ export default function Start() {
                   <span className="text-cyan-400">data-shift-auto="true"</span> automatically rewrites elements with these attributes:
                 </p>
                 <div className="grid grid-cols-3 gap-2 mt-2">
-                  {["data-shift-headline", "data-shift-subheadline", "data-shift-cta"].map(attr => (
+                  {["data-shift-headline", "data-shift-subheadline", "data-shift-cta", "data-shift-conversion"].map(attr => (
                     <code key={attr} className="text-[10px] font-mono bg-white/5 border border-white/8 rounded px-2 py-1 text-white/50 text-center break-all">{attr}</code>
                   ))}
                 </div>

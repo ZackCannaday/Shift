@@ -5,6 +5,7 @@ import dashboardRouter from "./dashboard";
 import keysRouter from "./keys";
 import embedRouter from "./embed";
 import authRouter from "./auth";
+import settingsRouter from "./settings";
 
 const router: IRouter = Router();
 
@@ -14,5 +15,6 @@ router.use(dashboardRouter);
 router.use(keysRouter);
 router.use(embedRouter);
 router.use(authRouter);
+router.use(settingsRouter);
 
 export default router;

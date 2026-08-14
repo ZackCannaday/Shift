@@ -7,7 +7,7 @@ import {
 import {
   ArrowLeft, Users, MousePointerClick, Percent, Clock,
   Activity, MapPin, Laptop, Terminal, Briefcase,
-  Paintbrush, Radio, TrendingUp, Key, ExternalLink, LogOut,
+  Paintbrush, Radio, TrendingUp, Key, ExternalLink, LogOut, Cpu, Save, AlertCircle,
 } from "lucide-react";
 
 const PERSONA: Record<string, { color: string; bg: string; border: string; label: string; icon: React.ElementType }> = {
@@ -18,11 +18,8 @@ const PERSONA: Record<string, { color: string; bg: string; border: string; label
 const DEFAULT_PERSONA = { color: "#94a3b8", bg: "rgba(148,163,184,0.08)", border: "rgba(148,163,184,0.2)", label: "Unknown", icon: Activity };
 function getPersona(p: string) { return PERSONA[p] ?? DEFAULT_PERSONA; }
 
-function apiUrl(path: string, apiKey: string | null) {
-  return apiKey ? `/api${path}?apiKey=${encodeURIComponent(apiKey)}` : `/api${path}`;
-}
 async function apiFetch<T>(url: string): Promise<T> {
-  const res = await fetch(url);
+  const res = await fetch(url, { credentials: "include" });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.json();
 }
@@ -126,25 +123,48 @@ const CustomTooltip = ({ active, payload, label }: any) => {
 export default function Dashboard() {
   const [, navigate] = useLocation();
   const [now, setNow] = useState(new Date());
-  const [apiKey, setApiKey] = useState<string | null>(null);
-  const [apiName, setApiName] = useState<string | null>(null);
+  const [account, setAccount] = useState<{ name: string; website: string | null } | null>(null);
+  const [authReady, setAuthReady] = useState(false);
+  const [provider, setProvider] = useState("rules");
+  const [providerModel, setProviderModel] = useState("");
+  const [providerKey, setProviderKey] = useState("");
+  const [providerConfigured, setProviderConfigured] = useState(false);
+  const [settingsMessage, setSettingsMessage] = useState<string | null>(null);
 
   useEffect(() => { const t = setInterval(() => setNow(new Date()), 1000); return () => clearInterval(t); }, []);
   useEffect(() => {
-    setApiKey(localStorage.getItem("shift_api_key"));
-    setApiName(localStorage.getItem("shift_api_name"));
-  }, []);
+    apiFetch<{ name: string; website: string | null }>("/api/auth/session")
+      .then((data) => { setAccount(data); setAuthReady(true); })
+      .catch(() => navigate("/login"));
+    apiFetch<{ provider: string; model: string | null; configured: boolean }>("/api/settings/ai")
+      .then((data) => { setProvider(data.provider); setProviderModel(data.model ?? ""); setProviderConfigured(data.configured); })
+      .catch(() => {});
+  }, [navigate]);
 
-  const handleLogout = () => {
-    localStorage.removeItem("shift_api_key");
-    localStorage.removeItem("shift_api_name");
+  const handleLogout = async () => {
+    await fetch("/api/auth/logout", { method: "POST", credentials: "include" });
     navigate("/");
   };
 
-  const { data: stats } = useQuery<DashboardStats>({ queryKey: ["stats", apiKey], queryFn: () => apiFetch(apiUrl("/dashboard/stats", apiKey)), refetchInterval: 10000 });
-  const { data: funnel } = useQuery<FunnelStat[]>({ queryKey: ["funnel", apiKey], queryFn: () => apiFetch(apiUrl("/dashboard/funnel-breakdown", apiKey)), refetchInterval: 10000 });
-  const { data: recent } = useQuery<Visitor[]>({ queryKey: ["recent", apiKey], queryFn: () => apiFetch(apiUrl("/dashboard/recent-activity", apiKey)), refetchInterval: 10000 });
-  const { data: timeseries } = useQuery<TimeseriesPoint[]>({ queryKey: ["timeseries", apiKey], queryFn: () => apiFetch(apiUrl("/dashboard/timeseries?days=7", apiKey)), refetchInterval: 30000 });
+  const saveProvider = async () => {
+    setSettingsMessage(null);
+    const res = await fetch("/api/settings/ai", {
+      method: "PUT",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ provider, model: providerModel || null, apiKey: providerKey || undefined }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) { setSettingsMessage(data.error ?? "Could not save provider settings"); return; }
+    setProviderConfigured(data.configured);
+    setProviderKey("");
+    setSettingsMessage("Provider settings saved");
+  };
+
+  const { data: stats, error: statsError } = useQuery<DashboardStats>({ queryKey: ["stats"], queryFn: () => apiFetch("/api/dashboard/stats"), enabled: authReady, refetchInterval: 10000 });
+  const { data: funnel } = useQuery<FunnelStat[]>({ queryKey: ["funnel"], queryFn: () => apiFetch("/api/dashboard/funnel-breakdown"), enabled: authReady, refetchInterval: 10000 });
+  const { data: recent } = useQuery<Visitor[]>({ queryKey: ["recent"], queryFn: () => apiFetch("/api/dashboard/recent-activity"), enabled: authReady, refetchInterval: 10000 });
+  const { data: timeseries } = useQuery<TimeseriesPoint[]>({ queryKey: ["timeseries"], queryFn: () => apiFetch("/api/dashboard/timeseries?days=7"), enabled: authReady, refetchInterval: 30000 });
 
   const convRate = ((stats?.conversionRate || 0) * 100).toFixed(1);
   const hasChartData = timeseries?.some(d => d.total > 0);
@@ -171,7 +191,7 @@ export default function Dashboard() {
           </div>
           <div className="flex items-center gap-2">
             <Link href="/"><button className="flex items-center gap-2 text-xs font-mono text-white/40 hover:text-white/80 transition-colors px-4 py-2.5 rounded-xl border border-white/10 hover:border-white/20 bg-white/[0.02]"><ArrowLeft className="w-3.5 h-3.5" />Live Site</button></Link>
-            {apiKey && (
+            {account && (
               <button onClick={handleLogout} className="flex items-center gap-2 text-xs font-mono text-white/30 hover:text-red-400 transition-colors px-3 py-2.5 rounded-xl border border-white/8 hover:border-red-800/30 bg-white/[0.02]">
                 <LogOut className="w-3.5 h-3.5" />
                 Sign out
@@ -180,29 +200,48 @@ export default function Dashboard() {
           </div>
         </header>
 
-        {/* API Key status bar */}
-        {apiKey ? (
-          <div className="flex items-center justify-between gap-4 px-4 py-3 rounded-xl border border-indigo-700/20 bg-indigo-950/10">
-            <div className="flex items-center gap-3 min-w-0">
-              <Key className="w-3.5 h-3.5 text-indigo-400 flex-shrink-0" />
-              <span className="text-xs font-mono text-white/50">Filtering by key for </span>
-              <span className="text-xs font-semibold text-white/80">{apiName ?? "your account"}</span>
-              <span className="text-xs font-mono text-white/20 hidden sm:inline">{apiKey.slice(0, 20)}···</span>
-            </div>
-            <Link href="/start"><button className="flex items-center gap-1.5 text-[11px] font-mono text-indigo-400 hover:text-indigo-300 transition-colors flex-shrink-0">Manage key <ExternalLink className="w-3 h-3" /></button></Link>
+        <div className="flex items-center justify-between gap-4 px-4 py-3 rounded-xl border border-indigo-700/20 bg-indigo-950/10">
+          <div className="flex items-center gap-3 min-w-0">
+            <Key className="w-3.5 h-3.5 text-indigo-400 flex-shrink-0" />
+            <span className="text-xs font-mono text-white/50">Secure site workspace</span>
+            <span className="text-xs font-semibold text-white/80">{account?.name ?? "Loading…"}</span>
+            {account?.website && <span className="text-xs font-mono text-white/20 hidden sm:inline">{account.website}</span>}
           </div>
-        ) : (
-          <div className="flex items-center justify-between gap-4 px-4 py-3 rounded-xl border border-white/8 bg-white/[0.02]">
-            <div className="flex items-center gap-3">
-              <Key className="w-3.5 h-3.5 text-white/30 flex-shrink-0" />
-              <span className="text-xs font-mono text-white/30">Showing all visitors · Sign in or get a key to filter by your site</span>
-            </div>
-            <div className="flex items-center gap-3">
-              <Link href="/login"><button className="text-[11px] font-mono text-indigo-400 hover:text-indigo-300 transition-colors flex-shrink-0 flex items-center gap-1">Sign in <ExternalLink className="w-3 h-3" /></button></Link>
-              <Link href="/start"><button className="text-[11px] font-mono text-cyan-400 hover:text-cyan-300 transition-colors flex-shrink-0 flex items-center gap-1">Get key <ExternalLink className="w-3 h-3" /></button></Link>
-            </div>
+          <Link href="/start"><button className="flex items-center gap-1.5 text-[11px] font-mono text-indigo-400 hover:text-indigo-300 transition-colors flex-shrink-0">Install guide <ExternalLink className="w-3 h-3" /></button></Link>
+        </div>
+
+        {statsError && (
+          <div className="flex items-center gap-2 rounded-xl border border-red-800/30 bg-red-950/20 px-4 py-3 text-xs text-red-300" role="alert">
+            <AlertCircle className="w-4 h-4" /> Analytics could not be loaded. Try signing in again or refresh the page.
           </div>
         )}
+
+        <section className="rounded-2xl border border-white/8 bg-white/[0.02] p-6" aria-labelledby="ai-provider-heading">
+          <div className="flex items-start justify-between gap-4 mb-5">
+            <div>
+              <h2 id="ai-provider-heading" className="text-sm font-semibold text-white/80 flex items-center gap-2"><Cpu className="w-4 h-4 text-cyan-400" />AI provider</h2>
+              <p className="text-xs text-white/30 font-mono mt-1">Bring your own provider, or use the private rules engine with no external AI.</p>
+            </div>
+            <span className="text-[10px] font-mono text-white/30 border border-white/8 rounded px-2 py-1">{providerConfigured ? "Credential encrypted" : "No external credential"}</span>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <label className="text-xs font-mono text-white/40">Provider
+              <select value={provider} onChange={(e) => setProvider(e.target.value)} className="mt-1.5 w-full bg-[#090914] border border-white/10 rounded-xl px-3 py-2.5 text-sm text-white outline-none focus:border-cyan-500/50">
+                <option value="rules">Built-in rules</option><option value="openai">OpenAI</option><option value="anthropic">Anthropic</option><option value="google">Google Gemini</option><option value="groq">Groq</option>
+              </select>
+            </label>
+            <label className="text-xs font-mono text-white/40">Model override
+              <input value={providerModel} onChange={(e) => setProviderModel(e.target.value)} placeholder="Use provider default" className="mt-1.5 w-full bg-[#090914] border border-white/10 rounded-xl px-3 py-2.5 text-sm text-white placeholder-white/20 outline-none focus:border-cyan-500/50" />
+            </label>
+            <label className="text-xs font-mono text-white/40">Provider API key
+              <input type="password" autoComplete="off" value={providerKey} onChange={(e) => setProviderKey(e.target.value)} disabled={provider === "rules"} placeholder={providerConfigured ? "Leave blank to keep current" : "Required for external AI"} className="mt-1.5 w-full bg-[#090914] border border-white/10 rounded-xl px-3 py-2.5 text-sm text-white placeholder-white/20 outline-none focus:border-cyan-500/50 disabled:opacity-40" />
+            </label>
+          </div>
+          <div className="mt-4 flex items-center justify-between gap-3">
+            <p className={`text-xs font-mono ${settingsMessage?.includes("saved") ? "text-emerald-400" : "text-red-400"}`} role="status">{settingsMessage}</p>
+            <button onClick={saveProvider} className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-black text-sm font-semibold"><Save className="w-4 h-4" />Save provider</button>
+          </div>
+        </section>
 
         {/* Stat Cards */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
@@ -297,21 +336,6 @@ export default function Dashboard() {
             </div>
           </div>
         </div>
-
-        {/* Install CTA */}
-        {!apiKey && (
-          <div className="rounded-2xl border border-cyan-700/20 bg-cyan-950/10 p-6 flex flex-col sm:flex-row items-center justify-between gap-4">
-            <div>
-              <div className="font-semibold text-white text-sm mb-1">Ready to personalize your own site?</div>
-              <p className="text-xs text-white/35 font-mono">Get an API key and drop one script tag onto any website.</p>
-            </div>
-            <Link href="/start">
-              <button className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-black font-bold text-sm transition-all shadow-[0_0_30px_rgba(34,211,238,0.2)] whitespace-nowrap">
-                Get Started Free <ExternalLink className="w-4 h-4" />
-              </button>
-            </Link>
-          </div>
-        )}
 
         <footer className="text-center text-[10px] font-mono text-white/15 pb-4">
           SHIFT · Visitor Personalization Engine · Updates every 10s

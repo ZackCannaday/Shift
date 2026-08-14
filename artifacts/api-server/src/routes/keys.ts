@@ -3,6 +3,7 @@ import { randomBytes } from "crypto";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
 import { db, apiKeysTable } from "@workspace/db";
+import { createDashboardSession } from "../lib/dashboard-session";
 
 const router: IRouter = Router();
 
@@ -19,8 +20,9 @@ router.post("/keys", async (req, res): Promise<void> => {
     return;
   }
 
-  const { name, email, website } = parsed.data;
-  const key = "sk_live_" + randomBytes(16).toString("hex");
+  const { name, website } = parsed.data;
+  const email = parsed.data.email.toLowerCase().trim();
+  const key = "pk_shift_" + randomBytes(16).toString("hex");
 
   try {
     const [created] = await db.insert(apiKeysTable).values({
@@ -30,6 +32,7 @@ router.post("/keys", async (req, res): Promise<void> => {
       website: website ?? null,
     }).returning();
 
+    await createDashboardSession(res, created.id);
     res.status(201).json({
       id: created.id,
       key: created.key,
@@ -38,7 +41,11 @@ router.post("/keys", async (req, res): Promise<void> => {
       website: created.website,
       createdAt: created.createdAt,
     });
-  } catch (err) {
+  } catch (err: any) {
+    if (err?.code === "23505") {
+      res.status(409).json({ error: "An account already exists for this email. Sign in instead." });
+      return;
+    }
     req.log.error({ err }, "Failed to create API key");
     res.status(500).json({ error: "Failed to create key" });
   }
@@ -46,7 +53,7 @@ router.post("/keys", async (req, res): Promise<void> => {
 
 router.get("/keys/:key", async (req, res): Promise<void> => {
   const key = req.params.key;
-  if (!key || !key.startsWith("sk_live_")) {
+  if (!key || !key.startsWith("pk_shift_")) {
     res.status(400).json({ error: "Invalid key format" });
     return;
   }
@@ -61,11 +68,7 @@ router.get("/keys/:key", async (req, res): Promise<void> => {
   res.json({
     id: record.id,
     name: record.name,
-    email: record.email,
-    website: record.website,
     isActive: record.isActive,
-    createdAt: record.createdAt,
-    lastUsedAt: record.lastUsedAt,
   });
 });
 

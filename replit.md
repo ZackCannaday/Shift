@@ -1,6 +1,6 @@
-# [Project name]
+# Shift
 
-_Replace the heading above with the project's name, and this line with one sentence describing what this app does for users._
+Traffic-aware website personalization with customer-selectable AI providers, a no-AI rules fallback, and conversion analytics.
 
 ## Run & Operate
 
@@ -10,6 +10,7 @@ _Replace the heading above with the project's name, and this line with one sente
 - `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
 - `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
 - Required env: `DATABASE_URL` — Postgres connection string
+- Required for external provider credentials: `SHIFT_ENCRYPTION_KEY` — base64-encoded 32-byte key
 
 ## Stack
 
@@ -22,15 +23,22 @@ _Replace the heading above with the project's name, and this line with one sente
 
 ## Where things live
 
-_Populate as you build — short repo map plus pointers to the source-of-truth file for DB schema, API contracts, theme files, etc._
+- `artifacts/shift` — React dashboard, onboarding, and self-demonstrating landing page
+- `artifacts/api-server` — Express API, embed script, provider adapters, auth, and analytics
+- `lib/db/src/schema` — database source of truth
+- `lib/api-spec/openapi.yaml` — generated-client contract; keep aligned with routes
 
 ## Architecture decisions
 
-_Populate as you build — non-obvious choices a reader couldn't infer from the code (3-5 bullets)._
+- Browser embeds use publishable site identifiers; dashboard authorization uses HttpOnly sessions.
+- All visitor records and analytics queries are scoped to a site ID.
+- External provider credentials are encrypted at rest and decrypted only for server-side requests.
+- Every provider returns the same Zod-validated personalization result.
+- Rules mode is the default and fallback so the page never depends on an external AI service.
 
 ## Product
 
-_Describe the high-level user-facing capabilities of this app once they exist._
+Customers install one script, mark approved content targets with data attributes, select an AI provider or rules mode, and review visitor, persona, conversion, and session telemetry.
 
 ## User preferences
 
@@ -38,7 +46,10 @@ _Populate as you build — explicit user instructions worth remembering across s
 
 ## Gotchas
 
-_Populate as you build — sharp edges, "always run X before Y" rules._
+- Apply DB schema changes before starting this branch.
+- Never use the publishable site key to authorize dashboard routes.
+- External providers require `SHIFT_ENCRYPTION_KEY`; rules mode does not.
+- Full workspace typecheck still includes generated Replit integration packages; validate the two product artifacts separately when unrelated generated-package errors occur.
 
 ## Pointers
 

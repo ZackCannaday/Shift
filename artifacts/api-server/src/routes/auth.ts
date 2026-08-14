@@ -2,7 +2,10 @@ import { Router, type IRouter } from "express";
 import { randomBytes } from "crypto";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
-import { db, apiKeysTable } from "@workspace/db";
+import { db, apiKeysTable, dashboardSessionsTable } from "@workspace/db";
+import { createDashboardSession } from "../lib/dashboard-session";
+import { hashToken } from "../lib/security";
+import { requireDashboardSession, type AuthenticatedRequest } from "../middlewares/dashboard-auth";
 
 const router: IRouter = Router();
 
@@ -34,21 +37,19 @@ router.post("/auth/request", async (req, res): Promise<void> => {
   }
 
   const record = records[0];
-  const token = randomBytes(20).toString("hex"); // 40-char hex token
+  const token = randomBytes(20).toString("hex"); // sent to the account owner only
   const expiry = new Date(Date.now() + 30 * 60 * 1000); // 30 min
 
   await db.update(apiKeysTable)
-    .set({ loginToken: token, loginTokenExpiry: expiry })
+    .set({ loginToken: hashToken(token), loginTokenExpiry: expiry })
     .where(eq(apiKeysTable.id, record.id));
 
-  // In production this would be sent by email.
-  // For now we return the token directly so the UI can show it.
-  res.json({
-    sent: true,
-    // Dev-mode only — remove this field when email sending is configured
-    _devToken: token,
-    _devName: record.name,
-  });
+  // An email adapter can consume this event in production. Never return a login
+  // token unless a developer has explicitly enabled local-only auth links.
+  req.log.info({ accountId: record.id }, "Magic login link requested");
+  res.json(process.env.ALLOW_DEV_AUTH_TOKENS === "true"
+    ? { sent: true, _devToken: token, _devName: record.name }
+    : { sent: true });
 });
 
 // POST /api/auth/verify — validate magic token, return key info
@@ -61,7 +62,7 @@ router.post("/auth/verify", async (req, res): Promise<void> => {
 
   const { token } = parsed.data;
   const [record] = await db.select().from(apiKeysTable)
-    .where(eq(apiKeysTable.loginToken, token))
+    .where(eq(apiKeysTable.loginToken, hashToken(token)))
     .limit(1);
 
   if (!record) {
@@ -84,12 +85,30 @@ router.post("/auth/verify", async (req, res): Promise<void> => {
     .set({ loginToken: null, loginTokenExpiry: null })
     .where(eq(apiKeysTable.id, record.id));
 
+  await createDashboardSession(res, record.id);
   res.json({
-    key: record.key,
     name: record.name,
     email: record.email,
     website: record.website,
   });
+});
+
+router.get("/auth/session", requireDashboardSession, async (req: AuthenticatedRequest, res): Promise<void> => {
+  const [record] = await db.select({ name: apiKeysTable.name, email: apiKeysTable.email, website: apiKeysTable.website })
+    .from(apiKeysTable)
+    .where(eq(apiKeysTable.id, req.shiftSiteId!))
+    .limit(1);
+  if (!record) {
+    res.status(401).json({ error: "Account not found" });
+    return;
+  }
+  res.json(record);
+});
+
+router.post("/auth/logout", requireDashboardSession, async (req: AuthenticatedRequest, res): Promise<void> => {
+  await db.delete(dashboardSessionsTable).where(eq(dashboardSessionsTable.apiKeyId, req.shiftSiteId!));
+  res.clearCookie("shift_session", { path: "/" });
+  res.status(204).send();
 });
 
 export default router;

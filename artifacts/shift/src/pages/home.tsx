@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link } from "wouter";
 import { useSession } from "@/hooks/use-session";
-import { useDetectIntent, useUpdateVisitor } from "@workspace/api-client-react";
+import { useDetectIntent } from "@workspace/api-client-react";
 import { Activity, ArrowRight, LayoutDashboard, Terminal, Briefcase, Paintbrush, Zap, Shield, Globe, KeyRound, LogIn } from "lucide-react";
 import type { IntentResult } from "@workspace/api-client-react";
 
@@ -69,12 +69,13 @@ export default function Home() {
   const sessionId = useSession();
   const [intentData, setIntentData] = useState<IntentResult | null>(null);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [detectionError, setDetectionError] = useState(false);
 
   const detectIntent = useDetectIntent();
-  const updateVisitor = useUpdateVisitor();
-
   useEffect(() => {
-    setIsLoggedIn(!!localStorage.getItem("shift_api_key"));
+    fetch("/api/auth/session", { credentials: "include" })
+      .then((res) => setIsLoggedIn(res.ok))
+      .catch(() => setIsLoggedIn(false));
   }, []);
 
   useEffect(() => {
@@ -97,14 +98,25 @@ export default function Home() {
       onSuccess: (data) => {
         setIntentData(data);
         sessionStorage.setItem('shift_intent_result', JSON.stringify(data));
-      }
+      },
+      onError: () => {
+        setDetectionError(true);
+        setIntentData({
+          persona: "business",
+          confidence: 0,
+          headline: "Make Every Visit More Relevant",
+          subheadline: "Match each campaign audience with a clear, approved message.",
+          ctaText: "Get Started",
+          funnelTheme: "Default experience",
+          reasoning: "The personalization service was unavailable, so the safe default experience was shown.",
+          visitorId: null,
+        } as IntentResult);
+      },
     });
   }, [sessionId]);
 
   const handleConvert = () => {
-    if (intentData?.visitorId) {
-      updateVisitor.mutate({ id: intentData.visitorId, data: { converted: true, conversionEvent: 'cta_click' } });
-    }
+    window.location.assign("/start");
   };
 
   if (!intentData) return <LoadingState />;
@@ -160,6 +172,11 @@ export default function Home() {
           <span className="opacity-40">·</span>
           <span>{Math.round(intentData.confidence * 100)}% confidence</span>
         </div>
+        {detectionError && (
+          <p className="-mt-7 mb-8 text-xs text-amber-300/70 font-mono" role="status">
+            Personalization is temporarily unavailable. Showing the default experience.
+          </p>
+        )}
 
         <h1 className="text-5xl md:text-7xl font-black tracking-tight mb-6 leading-[1.05] animate-in fade-in slide-in-from-bottom-6 duration-700 fill-mode-both delay-200" style={{ textShadow: `0 0 80px ${cfg.glow}` }}>
           {intentData.headline}

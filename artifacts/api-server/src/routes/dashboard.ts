@@ -1,21 +1,16 @@
 import { Router, type IRouter } from "express";
 import { desc, count, avg, eq, gte, and } from "drizzle-orm";
 import { sql } from "drizzle-orm";
-import { db, visitorsTable, apiKeysTable } from "@workspace/db";
+import { db, visitorsTable } from "@workspace/db";
 import { GetRecentActivityQueryParams } from "@workspace/api-zod";
+import { requireDashboardSession, type AuthenticatedRequest } from "../middlewares/dashboard-auth";
 
 const router: IRouter = Router();
 
-async function resolveApiKeyId(apiKey: string | undefined): Promise<number | null> {
-  if (!apiKey || !apiKey.startsWith("sk_live_")) return null;
-  const [record] = await db.select({ id: apiKeysTable.id }).from(apiKeysTable).where(eq(apiKeysTable.key, apiKey)).limit(1);
-  return record?.id ?? null;
-}
+router.use("/dashboard", requireDashboardSession);
 
-router.get("/dashboard/stats", async (req, res): Promise<void> => {
-  const apiKey = typeof req.query.apiKey === "string" ? req.query.apiKey : undefined;
-  const apiKeyId = await resolveApiKeyId(apiKey);
-  const whereClause = apiKeyId !== null ? eq(visitorsTable.apiKeyId, apiKeyId) : undefined;
+router.get("/dashboard/stats", async (req: AuthenticatedRequest, res): Promise<void> => {
+  const whereClause = eq(visitorsTable.apiKeyId, req.shiftSiteId!);
 
   const [totals] = await db.select({
     total: count(),
@@ -42,10 +37,8 @@ router.get("/dashboard/stats", async (req, res): Promise<void> => {
   });
 });
 
-router.get("/dashboard/funnel-breakdown", async (req, res): Promise<void> => {
-  const apiKey = typeof req.query.apiKey === "string" ? req.query.apiKey : undefined;
-  const apiKeyId = await resolveApiKeyId(apiKey);
-  const whereClause = apiKeyId !== null ? eq(visitorsTable.apiKeyId, apiKeyId) : undefined;
+router.get("/dashboard/funnel-breakdown", async (req: AuthenticatedRequest, res): Promise<void> => {
+  const whereClause = eq(visitorsTable.apiKeyId, req.shiftSiteId!);
 
   const rows = await db.select({
     persona: visitorsTable.persona,
@@ -67,12 +60,10 @@ router.get("/dashboard/funnel-breakdown", async (req, res): Promise<void> => {
   }));
 });
 
-router.get("/dashboard/recent-activity", async (req, res): Promise<void> => {
+router.get("/dashboard/recent-activity", async (req: AuthenticatedRequest, res): Promise<void> => {
   const params = GetRecentActivityQueryParams.safeParse(req.query);
   const limit = params.success ? (params.data.limit ?? 20) : 20;
-  const apiKey = typeof req.query.apiKey === "string" ? req.query.apiKey : undefined;
-  const apiKeyId = await resolveApiKeyId(apiKey);
-  const whereClause = apiKeyId !== null ? eq(visitorsTable.apiKeyId, apiKeyId) : undefined;
+  const whereClause = eq(visitorsTable.apiKeyId, req.shiftSiteId!);
 
   const rows = await db.select().from(visitorsTable)
     .where(whereClause).orderBy(desc(visitorsTable.createdAt)).limit(limit);
@@ -80,16 +71,11 @@ router.get("/dashboard/recent-activity", async (req, res): Promise<void> => {
   res.json(rows);
 });
 
-router.get("/dashboard/timeseries", async (req, res): Promise<void> => {
+router.get("/dashboard/timeseries", async (req: AuthenticatedRequest, res): Promise<void> => {
   const days = Math.min(Number(req.query.days) || 7, 30);
-  const apiKey = typeof req.query.apiKey === "string" ? req.query.apiKey : undefined;
-  const apiKeyId = await resolveApiKeyId(apiKey);
-
   const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
 
-  const baseWhere = apiKeyId !== null
-    ? and(eq(visitorsTable.apiKeyId, apiKeyId), gte(visitorsTable.createdAt, cutoff))
-    : gte(visitorsTable.createdAt, cutoff);
+  const baseWhere = and(eq(visitorsTable.apiKeyId, req.shiftSiteId!), gte(visitorsTable.createdAt, cutoff));
 
   const rows = await db.select({
     day: sql<string>`date_trunc('day', ${visitorsTable.createdAt})::date`,

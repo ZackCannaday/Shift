@@ -6,6 +6,7 @@ export const EMBED_SCRIPT = `(function () {
 
   var apiKey = script.getAttribute('data-shift-key');
   var autoMode = script.getAttribute('data-shift-auto') !== 'false';
+  var startedAt = Date.now();
 
   if (!apiKey) {
     console.warn('[Shift] Missing data-shift-key attribute on the script tag. Get your key at https://useshift.ai/start');
@@ -33,6 +34,7 @@ export const EMBED_SCRIPT = `(function () {
   }
 
   var CACHE_KEY = 'shift_r_' + apiKey.slice(-8);
+  attachTracking();
   try {
     var cached = sessionStorage.getItem(CACHE_KEY);
     if (cached) {
@@ -75,11 +77,37 @@ export const EMBED_SCRIPT = `(function () {
     });
 
   function dispatch(result) {
-    window.Shift = result;
+    window.Shift = Object.assign({}, result, { track: track });
     try {
       window.dispatchEvent(new CustomEvent('shift:ready', { detail: result, bubbles: false }));
     } catch (e) {}
     if (autoMode) applyAuto(result);
+  }
+
+  function track(name) {
+    sendEvent({ event: 'conversion', name: String(name || 'conversion').slice(0, 100) });
+  }
+
+  function sendEvent(event) {
+    fetch(apiBase + '/api/embed/events', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(Object.assign({ key: apiKey, sessionId: sessionId }, event)),
+      keepalive: true,
+    }).catch(function () {});
+  }
+
+  function attachTracking() {
+    document.addEventListener('click', function (event) {
+      var target = event.target && event.target.closest
+        ? event.target.closest('[data-shift-conversion],[data-shift-cta]')
+        : null;
+      if (!target) return;
+      track(target.getAttribute('data-shift-conversion') || 'cta_click');
+    });
+    window.addEventListener('pagehide', function () {
+      sendEvent({ event: 'session_end', timeOnSite: Math.max(0, Math.round((Date.now() - startedAt) / 1000)) });
+    });
   }
 
   function applyAuto(result) {

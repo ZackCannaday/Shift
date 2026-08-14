@@ -13,6 +13,7 @@ export default function Login() {
   const [devToken, setDevToken] = useState<string | null>(null);
   const [devName, setDevName] = useState<string | null>(null);
   const [verifying, setVerifying] = useState(false);
+  const [sent, setSent] = useState(false);
 
   // Handle magic link token in URL: /login?token=xxx
   useEffect(() => {
@@ -27,6 +28,7 @@ export default function Login() {
     try {
       const res = await fetch(`${API_BASE}/auth/verify`, {
         method: "POST",
+        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ token }),
       });
@@ -36,8 +38,6 @@ export default function Login() {
         setVerifying(false);
         return;
       }
-      localStorage.setItem("shift_api_key", data.key);
-      localStorage.setItem("shift_api_name", data.name);
       navigate("/dashboard");
     } catch {
       setError("Network error. Please try again.");
@@ -53,6 +53,7 @@ export default function Login() {
     try {
       const res = await fetch(`${API_BASE}/auth/request`, {
         method: "POST",
+        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: email.trim() }),
       });
@@ -66,7 +67,7 @@ export default function Login() {
         setDevToken(data._devToken);
         setDevName(data._devName ?? null);
       }
-      // If no devToken, just show "check your email" (prod mode)
+      setSent(true);
     } catch {
       setError("Network error. Please try again.");
     } finally {
@@ -117,7 +118,14 @@ export default function Login() {
             <p className="text-sm text-white/35 font-mono">Enter your email to receive a magic login link</p>
           </div>
 
-          {!devToken ? (
+          {sent && !devToken ? (
+            <div className="rounded-2xl border border-emerald-700/30 bg-emerald-950/20 p-6 text-center" role="status">
+              <CheckCircle className="w-8 h-8 text-emerald-400 mx-auto mb-3" />
+              <p className="text-sm font-semibold text-white mb-1">Check your email</p>
+              <p className="text-xs text-white/40 font-mono">If an account exists for {email}, a one-time login link is on its way.</p>
+              <button onClick={() => { setSent(false); setEmail(""); }} className="mt-5 text-xs font-mono text-indigo-400 hover:text-indigo-300">Use a different email</button>
+            </div>
+          ) : !devToken ? (
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>
                 <label className="block text-xs font-mono text-white/40 mb-1.5 uppercase tracking-wider">Email address</label>
@@ -182,7 +190,7 @@ export default function Login() {
               </div>
 
               <button
-                onClick={() => { setDevToken(null); setEmail(""); }}
+                onClick={() => { setDevToken(null); setSent(false); setEmail(""); }}
                 className="w-full text-xs font-mono text-white/25 hover:text-white/50 transition-colors py-2"
               >
                 ← Use a different email

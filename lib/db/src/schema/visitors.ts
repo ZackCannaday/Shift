@@ -1,4 +1,4 @@
-import { pgTable, text, serial, timestamp, boolean, real, integer } from "drizzle-orm/pg-core";
+import { pgTable, text, serial, timestamp, boolean, real, integer, index, uniqueIndex } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 import { apiKeysTable } from "./api-keys";
@@ -6,7 +6,7 @@ import { apiKeysTable } from "./api-keys";
 export const visitorsTable = pgTable("visitors", {
   id: serial("id").primaryKey(),
   apiKeyId: integer("api_key_id").references(() => apiKeysTable.id),
-  sessionId: text("session_id").notNull().unique(),
+  sessionId: text("session_id").notNull(),
   referrer: text("referrer"),
   utmSource: text("utm_source"),
   utmMedium: text("utm_medium"),
@@ -24,7 +24,11 @@ export const visitorsTable = pgTable("visitors", {
   timeOnSite: integer("time_on_site"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
-});
+}, (table) => [
+  uniqueIndex("visitors_site_session_unique").on(table.apiKeyId, table.sessionId),
+  index("visitors_site_created_idx").on(table.apiKeyId, table.createdAt),
+  index("visitors_site_persona_idx").on(table.apiKeyId, table.persona),
+]);
 
 export const insertVisitorSchema = createInsertSchema(visitorsTable).omit({ id: true, createdAt: true, updatedAt: true });
 export type InsertVisitor = z.infer<typeof insertVisitorSchema>;

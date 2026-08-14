@@ -1,5 +1,6 @@
 import express, { type Express } from "express";
 import cors from "cors";
+import cookieParser from "cookie-parser";
 import pinoHttp from "pino-http";
 import router from "./routes";
 import { logger } from "./lib/logger";
@@ -22,12 +23,13 @@ app.use(
 );
 
 // Allow all cross-origin requests (embed script makes cross-origin requests)
-app.use(cors({ origin: "*" }));
+app.use(cors({ origin: true, credentials: true }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+app.use(cookieParser());
 
 // Serve the embeddable script at the root level (not under /api)
-app.get("/shift.js", (_req, res) => {
+app.get(["/shift.js", "/api/shift.js"], (_req, res) => {
   res.setHeader("Content-Type", "application/javascript; charset=utf-8");
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Cache-Control", "public, max-age=3600");
