@@ -6,6 +6,7 @@ import keysRouter from "./keys";
 import embedRouter from "./embed";
 import authRouter from "./auth";
 import settingsRouter from "./settings";
+import contentRouter from "./content";
 
 const router: IRouter = Router();
 
@@ -16,5 +17,6 @@ router.use(keysRouter);
 router.use(embedRouter);
 router.use(authRouter);
 router.use(settingsRouter);
+router.use(contentRouter);
 
 export default router;

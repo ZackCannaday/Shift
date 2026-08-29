@@ -15,6 +15,8 @@ This branch contains the first two production-foundation checkpoints:
 - OpenAI, Anthropic, Google Gemini, Groq, and no-AI rules mode share one validated provider contract
 - customer provider keys are encrypted at rest with AES-256-GCM
 - provider failures fall back to the conservative rules experience
+- signed, short-lived event authorization binds telemetry to a detected site session
+- customer content targets, approved variant versions, goals, and control allocations have authenticated APIs
 - new workspaces remain pending until their owner verifies a one-time email link
 - users, organizations, memberships, and sites now have explicit ownership boundaries
 - sessions bind a verified user to an active site and re-check membership on every dashboard request
@@ -45,8 +47,8 @@ PORT=3000 BASE_PATH=/ pnpm --filter @workspace/shift run dev
 <script
   src="https://YOUR_SHIFT_HOST/api/shift.js"
   data-shift-key="pk_shift_..."
-  data-shift-auto="true">
-</script>
+  data-shift-auto="true"
+></script>
 
 <h1 data-shift-headline>Your approved default headline</h1>
 <p data-shift-subheadline>Your approved default subheadline</p>
@@ -64,6 +66,7 @@ Provider credentials are entered after dashboard authentication and never return
 - A publishable site key identifies a site; it does not authorize dashboard access.
 - Provider keys must never be placed in the embed or browser storage.
 - Production deployments must configure HTTPS and a durable, distributed rate limiter.
+- Production deployments must provide a unique `EVENT_SIGNING_KEY` with at least 32 UTF-8 bytes.
 - The stored website hostname is the embed origin allowlist for the first release.
 - Production email verification requires `PUBLIC_APP_URL`, `RESEND_API_KEY`, and a `SHIFT_FROM_EMAIL` address on a verified sending domain.
 - `ALLOW_DEV_AUTH_TOKENS` must remain disabled outside local development.

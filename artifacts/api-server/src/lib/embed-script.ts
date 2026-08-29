@@ -7,6 +7,11 @@ export const EMBED_SCRIPT = `(function () {
   var apiKey = script.getAttribute('data-shift-key');
   var autoMode = script.getAttribute('data-shift-auto') !== 'false';
   var startedAt = Date.now();
+  var eventToken = null;
+  var eventTokenExpiresAt = 0;
+  var refreshTimer = null;
+  var requestInFlight = false;
+  var pendingEvents = [];
 
   if (!apiKey) {
     console.warn('[Shift] Missing data-shift-key attribute on the script tag. Get your key at https://useshift.ai/start');
@@ -33,19 +38,19 @@ export const EMBED_SCRIPT = `(function () {
     sessionId = 'tmp_' + Math.random().toString(36).slice(2) + '_' + Date.now();
   }
 
-  var CACHE_KEY = 'shift_r_' + apiKey.slice(-8);
-  attachTracking();
-  try {
-    var cached = sessionStorage.getItem(CACHE_KEY);
-    if (cached) {
-      dispatch(JSON.parse(cached));
-      return;
+  function shortHash(value) {
+    var hash = 2166136261;
+    for (var i = 0; i < value.length; i++) {
+      hash ^= value.charCodeAt(i);
+      hash = Math.imul(hash, 16777619);
     }
-  } catch (e) {}
+    return (hash >>> 0).toString(36);
+  }
 
+  var pageScope = window.location.origin + window.location.pathname;
+  var CACHE_KEY = 'shift_r_' + shortHash(apiKey) + '_' + shortHash(pageScope);
   var params = new URLSearchParams(window.location.search);
   var w = window.innerWidth;
-
   var payload = {
     key: apiKey,
     sessionId: sessionId,
@@ -59,41 +64,130 @@ export const EMBED_SCRIPT = `(function () {
     deviceType: w < 768 ? 'mobile' : w < 1024 ? 'tablet' : 'desktop',
   };
 
-  fetch(apiBase + '/api/embed/detect', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  })
-    .then(function (r) {
-      if (!r.ok) throw new Error('HTTP ' + r.status);
-      return r.json();
+  attachTracking();
+  try {
+    var cached = sessionStorage.getItem(CACHE_KEY);
+    if (cached) {
+      var cachedResult = JSON.parse(cached);
+      if (hasUsableAuthorization(cachedResult)) {
+        dispatch(cachedResult);
+        return;
+      }
+      sessionStorage.removeItem(CACHE_KEY);
+    }
+  } catch (e) {}
+
+  requestDetection(false);
+
+  function hasUsableAuthorization(result) {
+    return result
+      && typeof result.eventToken === 'string'
+      && result.eventToken.length >= 64
+      && result.eventToken.length <= 1024
+      && typeof result.eventTokenExpiresAt === 'number'
+      && result.eventTokenExpiresAt * 1000 > Date.now() + 5000;
+  }
+
+  function requestDetection(refreshOnly) {
+    if (requestInFlight) return;
+    requestInFlight = true;
+    fetch(apiBase + '/api/embed/detect', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
     })
-    .then(function (result) {
-      try { sessionStorage.setItem(CACHE_KEY, JSON.stringify(result)); } catch (e) {}
-      dispatch(result);
-    })
-    .catch(function (err) {
-      console.warn('[Shift] Detection error:', err.message);
-    });
+      .then(function (r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+      })
+      .then(function (result) {
+        if (!hasUsableAuthorization(result)) throw new Error('Missing event authorization');
+        try { sessionStorage.setItem(CACHE_KEY, JSON.stringify(result)); } catch (e) {}
+        if (refreshOnly) setEventAuthorization(result);
+        else dispatch(result);
+      })
+      .catch(function (err) {
+        console.warn('[Shift] Detection error:', err.message);
+        scheduleAuthorizationRefresh(15000);
+      })
+      .finally(function () {
+        requestInFlight = false;
+      });
+  }
+
+  function setEventAuthorization(result) {
+    eventToken = result.eventToken;
+    eventTokenExpiresAt = result.eventTokenExpiresAt;
+    scheduleAuthorizationRefresh(Math.max(1000, eventTokenExpiresAt * 1000 - Date.now() - 30000));
+    flushPendingEvents();
+  }
+
+  function scheduleAuthorizationRefresh(delay) {
+    if (refreshTimer) window.clearTimeout(refreshTimer);
+    refreshTimer = window.setTimeout(function () {
+      requestDetection(true);
+    }, Math.min(Math.max(delay, 1000), 2147483647));
+  }
 
   function dispatch(result) {
-    window.Shift = Object.assign({}, result, { track: track });
+    setEventAuthorization(result);
+    var publicResult = Object.assign({}, result);
+    delete publicResult.eventToken;
+    delete publicResult.eventTokenExpiresAt;
+    window.Shift = Object.assign({}, publicResult, { track: track });
     try {
-      window.dispatchEvent(new CustomEvent('shift:ready', { detail: result, bubbles: false }));
+      window.dispatchEvent(new CustomEvent('shift:ready', { detail: publicResult, bubbles: false }));
     } catch (e) {}
-    if (autoMode) applyAuto(result);
+    if (autoMode) applyAuto(publicResult);
   }
 
   function track(name) {
     sendEvent({ event: 'conversion', name: String(name || 'conversion').slice(0, 100) });
   }
 
+  function authorizationIsCurrent() {
+    return typeof eventToken === 'string' && eventTokenExpiresAt * 1000 > Date.now() + 1000;
+  }
+
+  function queueEvent(event) {
+    if (pendingEvents.length >= 10) pendingEvents.shift();
+    pendingEvents.push(event);
+  }
+
+  function flushPendingEvents() {
+    if (!authorizationIsCurrent()) return;
+    var queued = pendingEvents.splice(0, pendingEvents.length);
+    for (var i = 0; i < queued.length; i++) sendAuthorizedEvent(queued[i]);
+  }
+
   function sendEvent(event) {
+    if (!authorizationIsCurrent()) {
+      queueEvent(event);
+      requestDetection(true);
+      return;
+    }
+    sendAuthorizedEvent(event);
+  }
+
+  function sendAuthorizedEvent(event) {
+    var submittedToken = eventToken;
     fetch(apiBase + '/api/embed/events', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(Object.assign({ key: apiKey, sessionId: sessionId }, event)),
+      body: JSON.stringify(Object.assign({ key: apiKey, sessionId: sessionId, eventToken: submittedToken }, event)),
       keepalive: true,
+    }).then(function (response) {
+      if (response.status === 401) {
+        queueEvent(event);
+        if (submittedToken === eventToken) {
+          eventToken = null;
+          eventTokenExpiresAt = 0;
+          try { sessionStorage.removeItem(CACHE_KEY); } catch (e) {}
+          requestDetection(true);
+        } else {
+          flushPendingEvents();
+        }
+      }
     }).catch(function () {});
   }
 

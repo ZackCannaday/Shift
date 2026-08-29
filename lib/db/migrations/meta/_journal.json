@@ -8,6 +8,13 @@
       "when": 1786748400000,
       "tag": "0000_stage_two_foundation",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1787976000000,
+      "tag": "0001_approved_content_foundation",
+      "breakpoints": true
     }
   ]
 }
