@@ -28,6 +28,8 @@ All material Shift changes are recorded here. Dates use UTC.
 
 - Embed result caching is scoped by site and page.
 - Embed event tokens stay private to the script runtime and page-scoped session cache.
+- Runtime content selection now applies only approved challenger content or the persisted safe fallback.
+- Stable control/challenger assignment is scoped by site, session, target, and normalized page path.
 - Package build-script allowlisting now uses explicit boolean policy entries.
 
 ### Verification
@@ -41,5 +43,5 @@ All material Shift changes are recorded here. Dates use UTC.
 
 - Test both migrations against a disposable PostgreSQL copy and prove rollback.
 - Add the customer-facing content and goal management workflow.
-- Integrate approved allocations into runtime selection and analytics attribution.
+- Add persisted allocation attribution and variant-performance analytics.
 - Complete browser-based desktop, mobile, keyboard, and accessibility verification.
