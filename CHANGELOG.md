@@ -12,6 +12,7 @@ All material Shift changes are recorded here. Dates use UTC.
 - Authenticated, tenant-scoped content management API routes.
 - Short-lived signed event authorization for embed conversions and session events.
 - Focused content-contract, embed-script, event-token, and runtime-security tests.
+- Approved product decision record covering production architecture, launch audience, personalization signals, AI authority, and publishing safeguards.
 
 ### Security
 
