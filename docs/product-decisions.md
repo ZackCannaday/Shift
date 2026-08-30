@@ -17,10 +17,6 @@ This file records user-approved product and production decisions for the isolate
 - Account model: one workspace can manage multiple websites.
 - Core outcome: personalize approved website content and calls-to-action to visitor intent, then measure results.
 
-## Phase 2 recommendations — pending confirmation
-
-These recommendations are intentionally documented but not treated as approved product decisions until the user confirms them.
-
 ### Personalization signals
 
 - Start with transparent, first-party web signals: normalized URL path, UTM campaign parameters, referrer category, and coarse device class.
