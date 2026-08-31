@@ -57,6 +57,15 @@ This file records user-approved product and production decisions for the isolate
 - Retain raw visitor/session data for 90 days and non-identifying aggregate analytics for 13 months.
 - Provide tenant-scoped export, visitor deletion, site deletion, and workspace deletion workflows with auditable verification.
 
+### Onboarding, providers, and launch
+
+- Use a resumable guided wizard from workspace creation through verified installation, first goal, first target, approval, traffic allocation, and activation preflight.
+- Launch provider-neutral BYO-credential adapters for OpenAI, Anthropic, and Google.
+- Keep AI draft-only and ensure provider failures cannot interrupt approved runtime personalization.
+- Begin with an invitation-only private beta and real usage metering without activated customer billing.
+- Plan Starter, Growth, and Scale subscription families after beta; exact pricing and limits require separate approval based on verified costs and usage.
+- Block public paid launch until technical, privacy, accessibility, operations, legal, support, and explicit approval gates pass.
+
 ## Change policy
 
 - Routine correctness, security, accessibility, testing, performance, and maintainability fixes may be applied automatically.
