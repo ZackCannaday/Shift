@@ -13,6 +13,7 @@ All material Shift changes are recorded here. Dates use UTC.
 - Short-lived signed event authorization for embed conversions and session events.
 - Focused content-contract, embed-script, event-token, and runtime-security tests.
 - Approved product decision record covering production architecture, launch audience, personalization signals, AI authority, and publishing safeguards.
+- Approved content-and-measurement contract with launch boundaries, future section-personalization roadmap, goal definitions, allocation rules, reporting requirements, and acceptance criteria.
 
 ### Security
 
