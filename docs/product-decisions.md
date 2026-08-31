@@ -48,6 +48,15 @@ This file records user-approved product and production decisions for the isolate
 - Retain an adjustable original-content control group and compare approved challengers against it.
 - Do not claim a winner when evidence is insufficient; statistical-confidence rules require separate approval and implementation.
 
+### Access and privacy
+
+- Launch with five fixed roles: Owner, Admin, Editor, Approver, and Analyst.
+- Enforce workspace and site isolation through API authorization and Supabase Row Level Security.
+- Allow transparent nontracking personalization before consent only when it creates no persistent visitor profile.
+- Collect visitor-level analytics and experiment attribution only after valid consent; honor Global Privacy Control and consent withdrawal.
+- Retain raw visitor/session data for 90 days and non-identifying aggregate analytics for 13 months.
+- Provide tenant-scoped export, visitor deletion, site deletion, and workspace deletion workflows with auditable verification.
+
 ## Change policy
 
 - Routine correctness, security, accessibility, testing, performance, and maintainability fixes may be applied automatically.
