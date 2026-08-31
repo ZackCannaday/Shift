@@ -38,6 +38,16 @@ This file records user-approved product and production decisions for the isolate
 - Use deterministic control/challenger allocation, signed event attribution, and automatic fallback when an allocation or variant is invalid.
 - Record who approved a variant and when; future changes create a new revision instead of silently mutating served content.
 
+## Approved on 2026-08-31
+
+### Content and measurement
+
+- Launch with core conversion-copy targets: headlines, subheadlines, calls to action, and short supporting text.
+- Plan complete page-section replacement as a future installment with a separate security, accessibility, compatibility, and rollback contract.
+- Provide conversion-goal templates for clicks, forms, bookings, and purchases alongside validated custom events.
+- Retain an adjustable original-content control group and compare approved challengers against it.
+- Do not claim a winner when evidence is insufficient; statistical-confidence rules require separate approval and implementation.
+
 ## Change policy
 
 - Routine correctness, security, accessibility, testing, performance, and maintainability fixes may be applied automatically.
