@@ -15,6 +15,7 @@ All material Shift changes are recorded here. Dates use UTC.
 - Approved product decision record covering production architecture, launch audience, personalization signals, AI authority, and publishing safeguards.
 - Approved content-and-measurement contract with launch boundaries, future section-personalization roadmap, goal definitions, allocation rules, reporting requirements, and acceptance criteria.
 - Approved access-and-privacy contract covering fixed roles, Supabase isolation, consent-aware collection, tiered retention, exports, and deletion.
+- Approved onboarding-and-launch contract covering the guided setup wizard, OpenAI/Anthropic/Google BYO adapters, private beta gates, usage metering, and planned subscription families.
 
 ### Security
 
