@@ -14,6 +14,7 @@ All material Shift changes are recorded here. Dates use UTC.
 - Focused content-contract, embed-script, event-token, and runtime-security tests.
 - Approved product decision record covering production architecture, launch audience, personalization signals, AI authority, and publishing safeguards.
 - Approved content-and-measurement contract with launch boundaries, future section-personalization roadmap, goal definitions, allocation rules, reporting requirements, and acceptance criteria.
+- Approved access-and-privacy contract covering fixed roles, Supabase isolation, consent-aware collection, tiered retention, exports, and deletion.
 
 ### Security
 
